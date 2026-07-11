@@ -392,6 +392,11 @@ void close_outputs(OutputDevice &color_output, OutputDevice &ir_output, OutputDe
     depth_output.close_device();
 }
 
+libfreenect2::Frame *find_frame(libfreenect2::FrameMap &frames, libfreenect2::Frame::Type type) {
+    const auto iterator = frames.find(type);
+    return iterator == frames.end() ? nullptr : iterator->second;
+}
+
 }  // namespace
 
 int main(int argc, char *argv[]) {
@@ -416,6 +421,7 @@ int main(int argc, char *argv[]) {
 
     const std::string serial = freenect2.getDefaultDeviceSerialNumber();
     auto pipeline = make_pipeline(config.pipeline);
+    // libfreenect2 transfers packet pipeline ownership to the opened device.
     libfreenect2::PacketPipeline *pipeline_ptr = pipeline.release();
     libfreenect2::Freenect2Device *device = freenect2.openDevice(serial, pipeline_ptr);
     if (!device) {
@@ -472,23 +478,26 @@ int main(int argc, char *argv[]) {
         }
 
         if (config.enable_color) {
-            auto *frame = frames[libfreenect2::Frame::Color];
-            rgb_to_yuyv(frame->data, color_output.buffer, config.color_width, config.color_height);
-            color_output.write_frame();
+            if (auto *frame = find_frame(frames, libfreenect2::Frame::Color)) {
+                rgb_to_yuyv(frame->data, color_output.buffer, config.color_width, config.color_height);
+                color_output.write_frame();
+            }
         }
 
         if (config.enable_ir) {
-            auto *frame = frames[libfreenect2::Frame::Ir];
-            auto grayscale = normalize_ir_frame(frame);
-            grayscale_to_yuyv(grayscale, ir_output.buffer);
-            ir_output.write_frame();
+            if (auto *frame = find_frame(frames, libfreenect2::Frame::Ir)) {
+                auto grayscale = normalize_ir_frame(frame);
+                grayscale_to_yuyv(grayscale, ir_output.buffer);
+                ir_output.write_frame();
+            }
         }
 
         if (config.enable_depth) {
-            auto *frame = frames[libfreenect2::Frame::Depth];
-            auto depth_bgrx = colorize_depth_frame(frame, config.depth_min_mm, config.depth_max_mm);
-            rgb_to_yuyv(depth_bgrx.data(), depth_output.buffer, config.depth_width, config.depth_height);
-            depth_output.write_frame();
+            if (auto *frame = find_frame(frames, libfreenect2::Frame::Depth)) {
+                auto depth_bgrx = colorize_depth_frame(frame, config.depth_min_mm, config.depth_max_mm);
+                rgb_to_yuyv(depth_bgrx.data(), depth_output.buffer, config.depth_width, config.depth_height);
+                depth_output.write_frame();
+            }
         }
 
         listener.release(frames);

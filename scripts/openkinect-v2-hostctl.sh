@@ -7,7 +7,12 @@ CONFIG_FILE="${OPENKINECT_CONFIG:-/etc/openkinect-v2/openkinect-v2.conf}"
 
 safe_config_path() {
   local resolved_path
-  resolved_path="$(realpath -m "$CONFIG_FILE")"
+  if [[ ! -f "$CONFIG_FILE" ]]; then
+    echo "Config file not found: $CONFIG_FILE" >&2
+    exit 1
+  fi
+
+  resolved_path="$(realpath "$CONFIG_FILE")"
 
   case "$resolved_path" in
     /etc/openkinect-v2/*) ;;
