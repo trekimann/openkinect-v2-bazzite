@@ -5,6 +5,16 @@ SERVICE="${OPENKINECT_SERVICE:-openkinect-v2.service}"
 AUDIO_STATUS_SCRIPT="${OPENKINECT_AUDIO_STATUS:-/usr/libexec/openkinect-v2/openkinect-audio-status.sh}"
 CONFIG_FILE="${OPENKINECT_CONFIG:-/etc/openkinect-v2/openkinect-v2.conf}"
 
+safe_config_path() {
+  case "$CONFIG_FILE" in
+    /etc/openkinect-v2/*) ;;
+    *)
+      echo "Refusing to read config outside /etc/openkinect-v2" >&2
+      exit 1
+      ;;
+  esac
+}
+
 usage() {
   cat <<USAGE
 Usage: $(basename "$0") [start|stop|restart|status|logs|audio-status|config]
@@ -23,7 +33,8 @@ case "$command" in
     exec "$AUDIO_STATUS_SCRIPT"
     ;;
   config)
-    exec cat "$CONFIG_FILE"
+    safe_config_path
+    exec sed -n '/^[A-Z_][A-Z0-9_]*=.*/p' "$CONFIG_FILE"
     ;;
   *)
     usage >&2

@@ -2,8 +2,13 @@
 import shutil
 import subprocess
 import sys
+import os
 
-APP = ["flatpak-spawn", "--host", "/usr/libexec/openkinect-v2/openkinect-v2-hostctl.sh"]
+HOSTCTL = os.environ.get(
+    "OPENKINECT_HOSTCTL",
+    "/usr/libexec/openkinect-v2/openkinect-v2-hostctl.sh",
+)
+APP = ["flatpak-spawn", "--host", HOSTCTL]
 
 
 def run(args):

@@ -30,7 +30,7 @@ fi
 need_module_reload=0
 if lsmod | grep -q '^v4l2loopback'; then
   for label in "${labels[@]}"; do
-    if ! grep -Rlx -- "$label" /sys/class/video4linux/*/name >/dev/null 2>&1; then
+    if ! grep -Fxl -- "$label" /sys/class/video4linux/*/name >/dev/null 2>&1; then
       need_module_reload=1
       break
     fi

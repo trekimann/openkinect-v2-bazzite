@@ -34,6 +34,18 @@
 
 namespace {
 
+constexpr double kYRed = 0.257;
+constexpr double kYGreen = 0.504;
+constexpr double kYBlue = 0.098;
+constexpr double kYBias = 16.0;
+constexpr double kURed = -0.148;
+constexpr double kUGreen = -0.291;
+constexpr double kUBlue = 0.439;
+constexpr double kVRed = 0.439;
+constexpr double kVGreen = -0.368;
+constexpr double kVBlue = -0.071;
+constexpr double kUvBias = 128.0;
+
 volatile sig_atomic_t stop_requested = 0;
 
 void handle_signal(int) {
@@ -232,10 +244,10 @@ void rgb_to_yuyv(const uint8_t *bgrx, std::vector<uint8_t> &yuyv, int width, int
             const int g1 = bgrx[index1 + 1];
             const int r1 = bgrx[index1 + 2];
 
-            const int y0 = std::clamp(static_cast<int>(0.257 * r0 + 0.504 * g0 + 0.098 * b0 + 16.0), 0, 255);
-            const int y1 = std::clamp(static_cast<int>(0.257 * r1 + 0.504 * g1 + 0.098 * b1 + 16.0), 0, 255);
-            const int u = std::clamp(static_cast<int>((-0.148 * r0 - 0.291 * g0 + 0.439 * b0 - 0.148 * r1 - 0.291 * g1 + 0.439 * b1) / 2.0 + 128.0), 0, 255);
-            const int v = std::clamp(static_cast<int>((0.439 * r0 - 0.368 * g0 - 0.071 * b0 + 0.439 * r1 - 0.368 * g1 - 0.071 * b1) / 2.0 + 128.0), 0, 255);
+            const int y0 = std::clamp(static_cast<int>(kYRed * r0 + kYGreen * g0 + kYBlue * b0 + kYBias), 0, 255);
+            const int y1 = std::clamp(static_cast<int>(kYRed * r1 + kYGreen * g1 + kYBlue * b1 + kYBias), 0, 255);
+            const int u = std::clamp(static_cast<int>((kURed * r0 + kUGreen * g0 + kUBlue * b0 + kURed * r1 + kUGreen * g1 + kUBlue * b1) / 2.0 + kUvBias), 0, 255);
+            const int v = std::clamp(static_cast<int>((kVRed * r0 + kVGreen * g0 + kVBlue * b0 + kVRed * r1 + kVGreen * g1 + kVBlue * b1) / 2.0 + kUvBias), 0, 255);
 
             yuyv[output_index++] = static_cast<uint8_t>(y0);
             yuyv[output_index++] = static_cast<uint8_t>(u);
@@ -372,6 +384,12 @@ bool configure_output(OutputDevice &device) {
     return device.open_device();
 }
 
+void close_outputs(OutputDevice &color_output, OutputDevice &ir_output, OutputDevice &depth_output) {
+    color_output.close_device();
+    ir_output.close_device();
+    depth_output.close_device();
+}
+
 }  // namespace
 
 int main(int argc, char *argv[]) {
@@ -422,9 +440,23 @@ int main(int argc, char *argv[]) {
     OutputDevice ir_output{"ir", config.ir_label, config.ir_device, config.ir_width, config.ir_height};
     OutputDevice depth_output{"depth", config.depth_label, config.depth_device, config.depth_width, config.depth_height};
 
-    if (config.enable_color && !configure_output(color_output)) return 1;
-    if (config.enable_ir && !configure_output(ir_output)) return 1;
-    if (config.enable_depth && !configure_output(depth_output)) return 1;
+    if (config.enable_color && !configure_output(color_output)) {
+        device->stop();
+        device->close();
+        return 1;
+    }
+    if (config.enable_ir && !configure_output(ir_output)) {
+        close_outputs(color_output, ir_output, depth_output);
+        device->stop();
+        device->close();
+        return 1;
+    }
+    if (config.enable_depth && !configure_output(depth_output)) {
+        close_outputs(color_output, ir_output, depth_output);
+        device->stop();
+        device->close();
+        return 1;
+    }
 
     std::signal(SIGINT, handle_signal);
     std::signal(SIGTERM, handle_signal);
@@ -458,9 +490,7 @@ int main(int argc, char *argv[]) {
         listener.release(frames);
     }
 
-    color_output.close_device();
-    ir_output.close_device();
-    depth_output.close_device();
+    close_outputs(color_output, ir_output, depth_output);
     device->stop();
     device->close();
     return 0;
