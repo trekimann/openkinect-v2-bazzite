@@ -1,0 +1,63 @@
+#!/bin/bash
+set -euo pipefail
+
+CONFIG_FILE="${OPENKINECT_CONFIG:-@OPENKINECT_CONFIG_FILE@}"
+OPENKINECT_BIN="${OPENKINECT_BIN:-@OPENKINECT_BIN_PATH@}"
+OPENKINECT_LIBDIRS="${OPENKINECT_LIBDIRS:-@OPENKINECT_RUNTIME_LIBDIRS@}"
+
+export LD_LIBRARY_PATH="$OPENKINECT_LIBDIRS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+if [[ -f "$CONFIG_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$CONFIG_FILE"
+  set +a
+fi
+
+labels=()
+if [[ "${ENABLE_COLOR:-1}" == "1" ]]; then
+  labels+=("${COLOR_LABEL:-Kinect_Color}")
+fi
+if [[ "${ENABLE_IR:-0}" == "1" ]]; then
+  labels+=("${IR_LABEL:-Kinect_IR}")
+fi
+if [[ "${ENABLE_DEPTH:-0}" == "1" ]]; then
+  labels+=("${DEPTH_LABEL:-Kinect_Depth}")
+fi
+
+if [[ ${#labels[@]} -eq 0 ]]; then
+  echo "No video streams enabled in $CONFIG_FILE" >&2
+  exit 1
+fi
+
+need_module_reload=0
+if lsmod | grep -q '^v4l2loopback'; then
+  for label in "${labels[@]}"; do
+    if ! grep -Fxl -- "$label" /sys/class/video4linux/*/name >/dev/null 2>&1; then
+      need_module_reload=1
+      break
+    fi
+  done
+else
+  need_module_reload=1
+fi
+
+if [[ $need_module_reload -eq 1 ]]; then
+  if lsmod | grep -q '^v4l2loopback' && ! modprobe -r v4l2loopback 2>/dev/null; then
+    echo "Unable to reload v4l2loopback; the module may still be in use by another process." >&2
+    exit 1
+  fi
+  modprobe_args=(
+    "devices=${#labels[@]}"
+    "card_label=$(IFS=,; echo "${labels[*]}")"
+    "exclusive_caps=${LOOPBACK_EXCLUSIVE_CAPS:-1}"
+  )
+
+  if [[ -n "${VIDEO_NR_LIST:-}" ]]; then
+    modprobe_args+=("video_nr=${VIDEO_NR_LIST}")
+  fi
+
+  modprobe v4l2loopback "${modprobe_args[@]}"
+fi
+
+exec "$OPENKINECT_BIN" --config "$CONFIG_FILE"

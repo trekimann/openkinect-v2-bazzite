@@ -1,0 +1,95 @@
+#!/bin/bash
+set -euo pipefail
+
+SERVICE="${OPENKINECT_SERVICE:-openkinect-v2.service}"
+AUDIO_STATUS_SCRIPT="${OPENKINECT_AUDIO_STATUS:-@OPENKINECT_AUDIO_STATUS_PATH@}"
+CONFIG_FILE="${OPENKINECT_CONFIG:-@OPENKINECT_CONFIG_FILE@}"
+
+safe_config_path() {
+  local resolved_path
+  if [[ ! -f "$CONFIG_FILE" ]]; then
+    echo "Config file not found: $CONFIG_FILE" >&2
+    exit 1
+  fi
+
+  resolved_path="$(realpath "$CONFIG_FILE")"
+
+  case "$resolved_path" in
+    /etc/openkinect-v2/*) ;;
+    *)
+      echo "Refusing to read config outside /etc/openkinect-v2" >&2
+      exit 1
+      ;;
+  esac
+
+  CONFIG_FILE="$resolved_path"
+}
+
+usage() {
+  cat <<USAGE
+Usage: $(basename "$0") [start|stop|restart|status|logs|audio-status|config|mode <color|ir|depth|all>]
+USAGE
+}
+
+set_mode() {
+  local mode="$1"
+  local enable_color=0
+  local enable_ir=0
+  local enable_depth=0
+
+  case "$mode" in
+    color)
+      enable_color=1
+      ;;
+    ir)
+      enable_ir=1
+      ;;
+    depth)
+      enable_depth=1
+      ;;
+    all)
+      enable_color=1
+      enable_ir=1
+      enable_depth=1
+      ;;
+    *)
+      echo "Unknown mode: $mode" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+
+  safe_config_path
+
+  sudo sed -i \
+    -e "s/^ENABLE_COLOR=.*/ENABLE_COLOR=$enable_color/" \
+    -e "s/^ENABLE_IR=.*/ENABLE_IR=$enable_ir/" \
+    -e "s/^ENABLE_DEPTH=.*/ENABLE_DEPTH=$enable_depth/" \
+    "$CONFIG_FILE"
+
+  exec sudo systemctl restart "$SERVICE"
+}
+
+command="${1:-status}"
+case "$command" in
+  start|stop|restart|status)
+    exec systemctl "$command" "$SERVICE"
+    ;;
+  logs)
+    exec journalctl -u "$SERVICE" -n "${2:-100}" --no-pager
+    ;;
+  audio-status)
+    exec "$AUDIO_STATUS_SCRIPT"
+    ;;
+  config)
+    safe_config_path
+    exec sed -n '/^[A-Z_][A-Z0-9_]*=.*/p' "$CONFIG_FILE"
+    ;;
+  mode)
+    set_mode "${2:-}"
+    ;;
+  *)
+    usage >&2
+    exit 1
+    ;;
+esac

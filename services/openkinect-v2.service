@@ -1,5 +1,5 @@
 [Unit]
-Description=OpenKinect v2 compatibility service
+Description=OpenKinect v2 multi-stream host service
 After=local-fs.target systemd-modules-load.service
 Wants=systemd-modules-load.service
 
@@ -14,3 +14,4 @@ StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
+Alias=kinect-webcam.service

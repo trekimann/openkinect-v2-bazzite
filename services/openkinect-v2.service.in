@@ -1,12 +1,12 @@
 [Unit]
-Description=OpenKinect v2 compatibility service
+Description=OpenKinect v2 multi-stream host service
 After=local-fs.target systemd-modules-load.service
 Wants=systemd-modules-load.service
 
 [Service]
 Type=simple
-EnvironmentFile=-/etc/openkinect-v2/openkinect-v2.conf
-ExecStart=/usr/libexec/openkinect-v2/openkinect-v2-runner.sh
+EnvironmentFile=-@OPENKINECT_CONFIG_FILE@
+ExecStart=@OPENKINECT_RUNNER_PATH@
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
@@ -14,3 +14,4 @@ StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
+Alias=kinect-webcam.service
