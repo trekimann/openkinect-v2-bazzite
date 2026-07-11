@@ -40,7 +40,10 @@ else
 fi
 
 if [[ $need_module_reload -eq 1 ]]; then
-  modprobe -r v4l2loopback 2>/dev/null || true
+  if lsmod | grep -q '^v4l2loopback' && ! modprobe -r v4l2loopback 2>/dev/null; then
+    echo "Unable to reload v4l2loopback; the module may still be in use by another process." >&2
+    exit 1
+  fi
   modprobe_args=(
     "devices=${#labels[@]}"
     "card_label=$(IFS=,; echo "${labels[*]}")"

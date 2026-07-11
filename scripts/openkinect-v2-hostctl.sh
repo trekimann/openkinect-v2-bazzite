@@ -6,13 +6,18 @@ AUDIO_STATUS_SCRIPT="${OPENKINECT_AUDIO_STATUS:-/usr/libexec/openkinect-v2/openk
 CONFIG_FILE="${OPENKINECT_CONFIG:-/etc/openkinect-v2/openkinect-v2.conf}"
 
 safe_config_path() {
-  case "$CONFIG_FILE" in
+  local resolved_path
+  resolved_path="$(realpath -m "$CONFIG_FILE")"
+
+  case "$resolved_path" in
     /etc/openkinect-v2/*) ;;
     *)
       echo "Refusing to read config outside /etc/openkinect-v2" >&2
       exit 1
       ;;
   esac
+
+  CONFIG_FILE="$resolved_path"
 }
 
 usage() {

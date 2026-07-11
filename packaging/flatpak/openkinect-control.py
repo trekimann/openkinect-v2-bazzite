@@ -13,7 +13,7 @@ APP = ["flatpak-spawn", "--host", HOSTCTL]
 
 def run(args):
     if shutil.which("flatpak-spawn") is None:
-        print("flatpak-spawn is required", file=sys.stderr)
+        print("flatpak-spawn is required; run this command from the Flatpak launcher or a Flatpak runtime.", file=sys.stderr)
         return 1
     return subprocess.call(APP + args)
 

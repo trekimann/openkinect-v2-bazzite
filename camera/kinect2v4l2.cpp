@@ -236,7 +236,8 @@ void rgb_to_yuyv(const uint8_t *bgrx, std::vector<uint8_t> &yuyv, int width, int
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; x += 2) {
             const int index0 = (y * width + x) * 4;
-            const int index1 = (y * width + std::min(x + 1, width - 1)) * 4;
+            const int paired_x = (x + 1 < width) ? x + 1 : x;
+            const int index1 = (y * width + paired_x) * 4;
             const int b0 = bgrx[index0 + 0];
             const int g0 = bgrx[index0 + 1];
             const int r0 = bgrx[index0 + 2];
@@ -261,7 +262,8 @@ void grayscale_to_yuyv(const std::vector<uint8_t> &gray, std::vector<uint8_t> &y
     size_t output_index = 0;
     for (size_t input_index = 0; input_index < gray.size(); input_index += 2) {
         const uint8_t y0 = gray[input_index];
-        const uint8_t y1 = gray[std::min(input_index + 1, gray.size() - 1)];
+        const size_t second_index = (input_index + 1 < gray.size()) ? input_index + 1 : input_index;
+        const uint8_t y1 = gray[second_index];
         yuyv[output_index++] = y0;
         yuyv[output_index++] = 128;
         yuyv[output_index++] = y1;
@@ -283,7 +285,7 @@ std::vector<uint8_t> normalize_ir_frame(const libfreenect2::Frame *frame) {
         }
     }
 
-    if (!(max_value > min_value)) {
+    if (max_value <= min_value) {
         std::fill(gray.begin(), gray.end(), 0);
         return gray;
     }
@@ -414,8 +416,10 @@ int main(int argc, char *argv[]) {
 
     const std::string serial = freenect2.getDefaultDeviceSerialNumber();
     auto pipeline = make_pipeline(config.pipeline);
-    libfreenect2::Freenect2Device *device = freenect2.openDevice(serial, pipeline.get());
+    libfreenect2::PacketPipeline *pipeline_ptr = pipeline.release();
+    libfreenect2::Freenect2Device *device = freenect2.openDevice(serial, pipeline_ptr);
     if (!device) {
+        delete pipeline_ptr;
         std::cerr << "Failed to open Kinect device" << std::endl;
         return 1;
     }
