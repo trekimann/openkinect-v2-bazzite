@@ -446,9 +446,9 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    OutputDevice color_output{"color", config.color_label, config.color_device, config.color_width, config.color_height};
-    OutputDevice ir_output{"ir", config.ir_label, config.ir_device, config.ir_width, config.ir_height};
-    OutputDevice depth_output{"depth", config.depth_label, config.depth_device, config.depth_width, config.depth_height};
+    OutputDevice color_output{"color", config.color_label, config.color_device, config.color_width, config.color_height, -1, {}};
+    OutputDevice ir_output{"ir", config.ir_label, config.ir_device, config.ir_width, config.ir_height, -1, {}};
+    OutputDevice depth_output{"depth", config.depth_label, config.depth_device, config.depth_width, config.depth_height, -1, {}};
 
     if (config.enable_color && !configure_output(color_output)) {
         device->stop();

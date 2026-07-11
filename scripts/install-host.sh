@@ -3,9 +3,21 @@ set -euo pipefail
 
 BUILD_DIR="${BUILD_DIR:-build}"
 PREFIX="${PREFIX:-/usr}"
+CMAKE_GENERATOR="${CMAKE_GENERATOR:-}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-cmake -S "$REPO_ROOT" -B "$REPO_ROOT/$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PREFIX"
+cmake_args=(
+	-S "$REPO_ROOT"
+	-B "$REPO_ROOT/$BUILD_DIR"
+	-DCMAKE_BUILD_TYPE=Release
+	-DCMAKE_INSTALL_PREFIX="$PREFIX"
+)
+
+if [[ -n "$CMAKE_GENERATOR" ]]; then
+	cmake_args+=( -G "$CMAKE_GENERATOR" )
+fi
+
+cmake "${cmake_args[@]}"
 cmake --build "$REPO_ROOT/$BUILD_DIR"
 sudo cmake --install "$REPO_ROOT/$BUILD_DIR"
 sudo systemctl daemon-reload

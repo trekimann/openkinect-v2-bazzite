@@ -19,13 +19,9 @@ This project provides **complete Linux support** for Xbox Kinect v2, filling the
 git clone https://github.com/BenGWeeks/openkinect-v2.git
 cd openkinect-v2
 ./install.sh
-
-# Start using Kinect as webcam
-openkinect-v2 start
-
-# Launch Zoom with Kinect
-openkinect-v2 zoom
 ```
+
+On Bazzite, `./install.sh` can be launched from the host or from a distrobox/dev container. If RPM Fusion is not already enabled, the first run stages the RPM Fusion release packages and asks for a reboot. A second run may then stage the remaining host packages and ask for one more reboot. The final run builds `libfreenect2`, installs the host service, and starts the default RGB webcam stream.
 
 ## 📸 Camera Features
 
@@ -86,20 +82,15 @@ For immutable Bazzite systems, use the host companion package plus the minimal F
 ## 🔧 Installation
 
 ```bash
-# Install dependencies
-sudo apt install libfreenect2-dev v4l2loopback-dkms jackd2
-
 # Clone repository
 git clone https://github.com/BenGWeeks/openkinect-v2.git
 cd openkinect-v2
 
-# Run installer
+# Run the Bazzite/Fedora-aware installer
 ./install.sh
-
-# Enable service
-sudo systemctl enable openkinect-v2
-sudo systemctl start openkinect-v2
 ```
+
+On current Bazzite systems the installer may need multiple runs because `rpm-ostree` applies repository and package layering through new deployments. The current host bootstrap intentionally uses a CPU-only `libfreenect2` build path, so it avoids extra GL development packages that can conflict with Bazzite's Mesa exclusions. See [docs/BAZZITE.md](docs/BAZZITE.md) for the host flow.
 
 ## 📁 Project Structure
 
