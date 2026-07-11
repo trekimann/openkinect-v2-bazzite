@@ -27,8 +27,47 @@ safe_config_path() {
 
 usage() {
   cat <<USAGE
-Usage: $(basename "$0") [start|stop|restart|status|logs|audio-status|config]
+Usage: $(basename "$0") [start|stop|restart|status|logs|audio-status|config|mode <color|ir|depth|all>]
 USAGE
+}
+
+set_mode() {
+  local mode="$1"
+  local enable_color=0
+  local enable_ir=0
+  local enable_depth=0
+
+  case "$mode" in
+    color)
+      enable_color=1
+      ;;
+    ir)
+      enable_ir=1
+      ;;
+    depth)
+      enable_depth=1
+      ;;
+    all)
+      enable_color=1
+      enable_ir=1
+      enable_depth=1
+      ;;
+    *)
+      echo "Unknown mode: $mode" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+
+  safe_config_path
+
+  sudo sed -i \
+    -e "s/^ENABLE_COLOR=.*/ENABLE_COLOR=$enable_color/" \
+    -e "s/^ENABLE_IR=.*/ENABLE_IR=$enable_ir/" \
+    -e "s/^ENABLE_DEPTH=.*/ENABLE_DEPTH=$enable_depth/" \
+    "$CONFIG_FILE"
+
+  exec sudo systemctl restart "$SERVICE"
 }
 
 command="${1:-status}"
@@ -45,6 +84,9 @@ case "$command" in
   config)
     safe_config_path
     exec sed -n '/^[A-Z_][A-Z0-9_]*=.*/p' "$CONFIG_FILE"
+    ;;
+  mode)
+    set_mode "${2:-}"
     ;;
   *)
     usage >&2

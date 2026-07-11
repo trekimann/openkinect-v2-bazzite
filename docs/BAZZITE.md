@@ -99,6 +99,10 @@ Useful commands:
 /usr/libexec/openkinect-v2/openkinect-audio-status.sh
 /usr/libexec/openkinect-v2/kinect-audio-setup.sh
 /usr/libexec/openkinect-v2/kinect-record.sh 5 sample.wav
+/usr/local/libexec/openkinect-v2/openkinect-v2-hostctl.sh restart
+/usr/local/libexec/openkinect-v2/openkinect-v2-hostctl.sh mode color
+/usr/local/libexec/openkinect-v2/openkinect-v2-hostctl.sh mode ir
+/usr/local/libexec/openkinect-v2/openkinect-v2-hostctl.sh mode depth
 ```
 
 ## Flatpak launcher
@@ -110,4 +114,7 @@ flatpak run org.openkinect.OpenKinectV2 status
 flatpak run org.openkinect.OpenKinectV2 start
 flatpak run org.openkinect.OpenKinectV2 stop
 flatpak run org.openkinect.OpenKinectV2 audio-status
+flatpak run org.openkinect.OpenKinectV2 mode color
+flatpak run org.openkinect.OpenKinectV2 mode ir
+flatpak run org.openkinect.OpenKinectV2 mode depth
 ```
