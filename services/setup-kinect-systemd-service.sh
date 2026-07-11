@@ -1,33 +1,22 @@
 #!/bin/bash
-# Setup systemd service for Kinect webcam
+set -euo pipefail
 
-echo "Setting up Kinect webcam systemd service..."
+PREFIX="${PREFIX:-/usr}"
+LIBEXECDIR="${LIBEXECDIR:-$PREFIX/libexec/openkinect-v2}"
+SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
+CONFIG_DIR="${CONFIG_DIR:-/etc/openkinect-v2}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Copy service file
-sudo cp kinect-webcam.service /etc/systemd/system/
-sudo chmod 644 /etc/systemd/system/kinect-webcam.service
+sudo install -d "$SYSTEMD_DIR" "$CONFIG_DIR" "$LIBEXECDIR"
+sudo install -m 0644 "$REPO_ROOT/services/openkinect-v2.service" "$SYSTEMD_DIR/openkinect-v2.service"
+sudo install -m 0644 "$REPO_ROOT/services/openkinect-v2.conf" "$CONFIG_DIR/openkinect-v2.conf"
+sudo install -m 0755 "$REPO_ROOT/camera/openkinect-v2-runner.sh" "$LIBEXECDIR/openkinect-v2-runner.sh"
 
-# Ensure the wrapper script is executable
-chmod +x kinect-webcam-service-wrapper.sh
-
-# Ensure kinect2v4l2 binary is executable
-chmod +x kinect2v4l2
-
-# Reload systemd
+echo "Installed service files. Build and install openkinect-v2d before starting the service."
 sudo systemctl daemon-reload
+sudo systemctl enable openkinect-v2.service
 
-# Enable service
-sudo systemctl enable kinect-webcam.service
-
-echo "✓ Service installed and enabled"
-echo ""
 echo "Commands:"
-echo "  Start:   sudo systemctl start kinect-webcam"
-echo "  Stop:    sudo systemctl stop kinect-webcam"
-echo "  Status:  sudo systemctl status kinect-webcam"
-echo "  Logs:    sudo journalctl -u kinect-webcam -f"
-echo ""
-echo "The service will start automatically on boot."
-echo ""
-echo "IMPORTANT: You still need to launch Zoom with:"
-echo "  zoom --use-file-for-fake-video-capture=/dev/video2"
+echo "  sudo systemctl start openkinect-v2"
+echo "  sudo systemctl status openkinect-v2"
+echo "  sudo journalctl -u openkinect-v2 -f"

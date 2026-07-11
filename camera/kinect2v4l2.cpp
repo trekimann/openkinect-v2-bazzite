@@ -1,142 +1,467 @@
 #include <libfreenect2/libfreenect2.hpp>
 #include <libfreenect2/frame_listener_impl.h>
-#include <libfreenect2/registration.h>
 #include <libfreenect2/packet_pipeline.h>
-#include <iostream>
-#include <signal.h>
-#include <unistd.h>
-#include <sys/ioctl.h>
-#include <fcntl.h>
-#include <linux/videodev2.h>
-#include <cstring>
+#if __has_include(<libfreenect2/opencl_packet_pipeline.h>)
+#include <libfreenect2/opencl_packet_pipeline.h>
+#define OPENKINECT_HAS_OPENCL 1
+#endif
+#if __has_include(<libfreenect2/opengl_packet_pipeline.h>)
+#include <libfreenect2/opengl_packet_pipeline.h>
+#define OPENKINECT_HAS_OPENGL 1
+#endif
+#if __has_include(<libfreenect2/cpu_packet_pipeline.h>)
+#include <libfreenect2/cpu_packet_pipeline.h>
+#endif
 #include <algorithm>
+#include <cmath>
+#include <csignal>
+#include <cstdint>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <fcntl.h>
+#include <iostream>
+#include <linux/videodev2.h>
+#include <limits>
+#include <memory>
+#include <map>
+#include <optional>
+#include <sstream>
+#include <string>
+#include <sys/ioctl.h>
+#include <unistd.h>
+#include <vector>
 
-bool stop = false;
-void sighandler(int) { stop = true; }
+namespace {
 
-// Simple BGRX to YUV420 conversion
-void convertBGRXtoYUV420(const uint8_t* bgrx, uint8_t* yuv, int width, int height) {
-    uint8_t* y = yuv;
-    uint8_t* u = yuv + (width * height);
-    uint8_t* v = u + (width * height / 4);
-    
-    for (int j = 0; j < height; j++) {
-        for (int i = 0; i < width; i++) {
-            int idx = (j * width + i) * 4;
-            uint8_t b = bgrx[idx];
-            uint8_t g = bgrx[idx + 1];
-            uint8_t r = bgrx[idx + 2];
-            
-            // Y plane
-            y[j * width + i] = std::min(255, std::max(0, (int)(0.299 * r + 0.587 * g + 0.114 * b)));
-            
-            // U and V planes (subsample 2x2)
-            if (j % 2 == 0 && i % 2 == 0) {
-                int uv_idx = (j / 2) * (width / 2) + (i / 2);
-                u[uv_idx] = std::min(255, std::max(0, (int)(-0.147 * r - 0.289 * g + 0.436 * b + 128)));
-                v[uv_idx] = std::min(255, std::max(0, (int)(0.615 * r - 0.515 * g - 0.100 * b + 128)));
-            }
+volatile sig_atomic_t stop_requested = 0;
+
+void handle_signal(int) {
+    stop_requested = 1;
+}
+
+std::string trim(const std::string &value) {
+    const auto start = value.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) {
+        return "";
+    }
+    const auto end = value.find_last_not_of(" \t\r\n");
+    return value.substr(start, end - start + 1);
+}
+
+bool parse_bool(const std::string &value, bool default_value) {
+    const std::string normalized = trim(value);
+    if (normalized == "1" || normalized == "true" || normalized == "TRUE" || normalized == "yes") {
+        return true;
+    }
+    if (normalized == "0" || normalized == "false" || normalized == "FALSE" || normalized == "no") {
+        return false;
+    }
+    return default_value;
+}
+
+int parse_int(const std::string &value, int default_value) {
+    try {
+        return std::stoi(trim(value));
+    } catch (...) {
+        return default_value;
+    }
+}
+
+float parse_float(const std::string &value, float default_value) {
+    try {
+        return std::stof(trim(value));
+    } catch (...) {
+        return default_value;
+    }
+}
+
+struct Config {
+    std::string pipeline = "auto";
+    bool enable_color = true;
+    bool enable_ir = false;
+    bool enable_depth = false;
+    std::string color_label = "Kinect_Color";
+    std::string ir_label = "Kinect_IR";
+    std::string depth_label = "Kinect_Depth";
+    std::string color_device;
+    std::string ir_device;
+    std::string depth_device;
+    int color_width = 1920;
+    int color_height = 1080;
+    int ir_width = 512;
+    int ir_height = 424;
+    int depth_width = 512;
+    int depth_height = 424;
+    float depth_min_mm = 500.0f;
+    float depth_max_mm = 4500.0f;
+};
+
+Config load_config(const std::string &path) {
+    Config config;
+    std::ifstream input(path);
+    if (!input.is_open()) {
+        return config;
+    }
+
+    std::string line;
+    while (std::getline(input, line)) {
+        line = trim(line);
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+
+        const auto separator = line.find('=');
+        if (separator == std::string::npos) {
+            continue;
+        }
+
+        const std::string key = trim(line.substr(0, separator));
+        std::string value = trim(line.substr(separator + 1));
+        if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+            value = value.substr(1, value.size() - 2);
+        }
+
+        if (key == "PIPELINE") config.pipeline = value;
+        else if (key == "ENABLE_COLOR") config.enable_color = parse_bool(value, config.enable_color);
+        else if (key == "ENABLE_IR") config.enable_ir = parse_bool(value, config.enable_ir);
+        else if (key == "ENABLE_DEPTH") config.enable_depth = parse_bool(value, config.enable_depth);
+        else if (key == "COLOR_LABEL") config.color_label = value;
+        else if (key == "IR_LABEL") config.ir_label = value;
+        else if (key == "DEPTH_LABEL") config.depth_label = value;
+        else if (key == "COLOR_DEVICE") config.color_device = value;
+        else if (key == "IR_DEVICE") config.ir_device = value;
+        else if (key == "DEPTH_DEVICE") config.depth_device = value;
+        else if (key == "COLOR_WIDTH") config.color_width = parse_int(value, config.color_width);
+        else if (key == "COLOR_HEIGHT") config.color_height = parse_int(value, config.color_height);
+        else if (key == "IR_WIDTH") config.ir_width = parse_int(value, config.ir_width);
+        else if (key == "IR_HEIGHT") config.ir_height = parse_int(value, config.ir_height);
+        else if (key == "DEPTH_WIDTH") config.depth_width = parse_int(value, config.depth_width);
+        else if (key == "DEPTH_HEIGHT") config.depth_height = parse_int(value, config.depth_height);
+        else if (key == "DEPTH_MIN_MM") config.depth_min_mm = parse_float(value, config.depth_min_mm);
+        else if (key == "DEPTH_MAX_MM") config.depth_max_mm = parse_float(value, config.depth_max_mm);
+    }
+
+    return config;
+}
+
+std::optional<std::string> resolve_video_device_by_label(const std::string &label) {
+    namespace fs = std::filesystem;
+    const fs::path root("/sys/class/video4linux");
+    if (!fs::exists(root)) {
+        return std::nullopt;
+    }
+
+    for (const auto &entry : fs::directory_iterator(root)) {
+        std::ifstream name_file(entry.path() / "name");
+        std::string current_name;
+        std::getline(name_file, current_name);
+        if (trim(current_name) == label) {
+            return std::string("/dev/") + entry.path().filename().string();
+        }
+    }
+
+    return std::nullopt;
+}
+
+struct OutputDevice {
+    std::string name;
+    std::string label;
+    std::string path;
+    int width = 0;
+    int height = 0;
+    int fd = -1;
+    std::vector<uint8_t> buffer;
+
+    bool open_device() {
+        fd = open(path.c_str(), O_RDWR);
+        if (fd < 0) {
+            std::cerr << "Failed to open " << name << " device at " << path << std::endl;
+            return false;
+        }
+
+        struct v4l2_format format;
+        std::memset(&format, 0, sizeof(format));
+        format.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+        format.fmt.pix.width = width;
+        format.fmt.pix.height = height;
+        format.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
+        format.fmt.pix.sizeimage = width * height * 2;
+        format.fmt.pix.field = V4L2_FIELD_NONE;
+
+        if (ioctl(fd, VIDIOC_S_FMT, &format) < 0) {
+            std::cerr << "Failed to set V4L2 format for " << name << std::endl;
+            close(fd);
+            fd = -1;
+            return false;
+        }
+
+        buffer.resize(static_cast<size_t>(width) * static_cast<size_t>(height) * 2U);
+        std::cout << "Streaming " << name << " to " << path << " (label " << label << ")" << std::endl;
+        return true;
+    }
+
+    void close_device() {
+        if (fd >= 0) {
+            close(fd);
+            fd = -1;
+        }
+    }
+
+    bool write_frame() {
+        const ssize_t expected = static_cast<ssize_t>(buffer.size());
+        const ssize_t written = write(fd, buffer.data(), buffer.size());
+        if (written != expected) {
+            std::cerr << "Short write to " << name << " output" << std::endl;
+            return false;
+        }
+        return true;
+    }
+};
+
+void rgb_to_yuyv(const uint8_t *bgrx, std::vector<uint8_t> &yuyv, int width, int height) {
+    size_t output_index = 0;
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; x += 2) {
+            const int index0 = (y * width + x) * 4;
+            const int index1 = (y * width + std::min(x + 1, width - 1)) * 4;
+            const int b0 = bgrx[index0 + 0];
+            const int g0 = bgrx[index0 + 1];
+            const int r0 = bgrx[index0 + 2];
+            const int b1 = bgrx[index1 + 0];
+            const int g1 = bgrx[index1 + 1];
+            const int r1 = bgrx[index1 + 2];
+
+            const int y0 = std::clamp(static_cast<int>(0.257 * r0 + 0.504 * g0 + 0.098 * b0 + 16.0), 0, 255);
+            const int y1 = std::clamp(static_cast<int>(0.257 * r1 + 0.504 * g1 + 0.098 * b1 + 16.0), 0, 255);
+            const int u = std::clamp(static_cast<int>((-0.148 * r0 - 0.291 * g0 + 0.439 * b0 - 0.148 * r1 - 0.291 * g1 + 0.439 * b1) / 2.0 + 128.0), 0, 255);
+            const int v = std::clamp(static_cast<int>((0.439 * r0 - 0.368 * g0 - 0.071 * b0 + 0.439 * r1 - 0.368 * g1 - 0.071 * b1) / 2.0 + 128.0), 0, 255);
+
+            yuyv[output_index++] = static_cast<uint8_t>(y0);
+            yuyv[output_index++] = static_cast<uint8_t>(u);
+            yuyv[output_index++] = static_cast<uint8_t>(y1);
+            yuyv[output_index++] = static_cast<uint8_t>(v);
         }
     }
 }
 
+void grayscale_to_yuyv(const std::vector<uint8_t> &gray, std::vector<uint8_t> &yuyv) {
+    size_t output_index = 0;
+    for (size_t input_index = 0; input_index < gray.size(); input_index += 2) {
+        const uint8_t y0 = gray[input_index];
+        const uint8_t y1 = gray[std::min(input_index + 1, gray.size() - 1)];
+        yuyv[output_index++] = y0;
+        yuyv[output_index++] = 128;
+        yuyv[output_index++] = y1;
+        yuyv[output_index++] = 128;
+    }
+}
+
+std::vector<uint8_t> normalize_ir_frame(const libfreenect2::Frame *frame) {
+    const auto *input = reinterpret_cast<const float *>(frame->data);
+    std::vector<uint8_t> gray(static_cast<size_t>(frame->width) * static_cast<size_t>(frame->height));
+
+    float min_value = std::numeric_limits<float>::max();
+    float max_value = std::numeric_limits<float>::lowest();
+    for (size_t i = 0; i < gray.size(); ++i) {
+        const float value = input[i];
+        if (std::isfinite(value)) {
+            min_value = std::min(min_value, value);
+            max_value = std::max(max_value, value);
+        }
+    }
+
+    if (!(max_value > min_value)) {
+        std::fill(gray.begin(), gray.end(), 0);
+        return gray;
+    }
+
+    const float scale = 255.0f / (max_value - min_value);
+    for (size_t i = 0; i < gray.size(); ++i) {
+        const float value = input[i];
+        gray[i] = std::isfinite(value)
+            ? static_cast<uint8_t>(std::clamp((value - min_value) * scale, 0.0f, 255.0f))
+            : 0;
+    }
+
+    return gray;
+}
+
+void write_depth_color(float normalized, uint8_t &r, uint8_t &g, uint8_t &b) {
+    normalized = std::clamp(normalized, 0.0f, 1.0f);
+    if (normalized < 0.25f) {
+        r = 0;
+        g = static_cast<uint8_t>(normalized / 0.25f * 255.0f);
+        b = 255;
+    } else if (normalized < 0.5f) {
+        r = 0;
+        g = 255;
+        b = static_cast<uint8_t>((1.0f - (normalized - 0.25f) / 0.25f) * 255.0f);
+    } else if (normalized < 0.75f) {
+        r = static_cast<uint8_t>(((normalized - 0.5f) / 0.25f) * 255.0f);
+        g = 255;
+        b = 0;
+    } else {
+        r = 255;
+        g = static_cast<uint8_t>((1.0f - (normalized - 0.75f) / 0.25f) * 255.0f);
+        b = 0;
+    }
+}
+
+std::vector<uint8_t> colorize_depth_frame(const libfreenect2::Frame *frame, float min_mm, float max_mm) {
+    const auto *input = reinterpret_cast<const float *>(frame->data);
+    std::vector<uint8_t> bgrx(static_cast<size_t>(frame->width) * static_cast<size_t>(frame->height) * 4U, 0);
+    const float range = std::max(1.0f, max_mm - min_mm);
+
+    for (size_t pixel = 0; pixel < static_cast<size_t>(frame->width) * static_cast<size_t>(frame->height); ++pixel) {
+        const float value = input[pixel];
+        uint8_t r = 0;
+        uint8_t g = 0;
+        uint8_t b = 0;
+        if (std::isfinite(value) && value >= min_mm && value <= max_mm) {
+            write_depth_color((value - min_mm) / range, r, g, b);
+        }
+        const size_t base = pixel * 4;
+        bgrx[base + 0] = b;
+        bgrx[base + 1] = g;
+        bgrx[base + 2] = r;
+        bgrx[base + 3] = 255;
+    }
+
+    return bgrx;
+}
+
+std::unique_ptr<libfreenect2::PacketPipeline> make_pipeline(const std::string &requested) {
+    const std::string pipeline = requested.empty() ? "auto" : requested;
+#if defined(OPENKINECT_HAS_OPENCL)
+    if (pipeline == "opencl" || pipeline == "auto") {
+        try {
+            std::cout << "Using OpenCL packet pipeline" << std::endl;
+            return std::make_unique<libfreenect2::OpenCLPacketPipeline>();
+        } catch (...) {
+            if (pipeline == "opencl") throw;
+        }
+    }
+#endif
+#if defined(OPENKINECT_HAS_OPENGL)
+    if (pipeline == "opengl" || pipeline == "auto") {
+        try {
+            std::cout << "Using OpenGL packet pipeline" << std::endl;
+            return std::make_unique<libfreenect2::OpenGLPacketPipeline>();
+        } catch (...) {
+            if (pipeline == "opengl") throw;
+        }
+    }
+#endif
+    std::cout << "Using CPU packet pipeline" << std::endl;
+    return std::make_unique<libfreenect2::CpuPacketPipeline>();
+}
+
+bool configure_output(OutputDevice &device) {
+    if (!device.path.empty()) {
+        return device.open_device();
+    }
+
+    auto resolved = resolve_video_device_by_label(device.label);
+    if (!resolved) {
+        std::cerr << "Unable to locate V4L2 loopback device labeled " << device.label << std::endl;
+        return false;
+    }
+
+    device.path = *resolved;
+    return device.open_device();
+}
+
+}  // namespace
+
 int main(int argc, char *argv[]) {
-    std::string device_path = "/dev/video2";
-    if (argc > 1) device_path = argv[1];
+    std::string config_path = "/etc/openkinect-v2/openkinect-v2.conf";
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--config" && i + 1 < argc) {
+            config_path = argv[++i];
+        }
+    }
 
-    // Open V4L2 device
-    int fd = open(device_path.c_str(), O_RDWR);
-    if (fd < 0) {
-        std::cerr << "Failed to open " << device_path << std::endl;
+    Config config = load_config(config_path);
+    if (!config.enable_color && !config.enable_ir && !config.enable_depth) {
+        std::cerr << "At least one stream must be enabled in " << config_path << std::endl;
         return 1;
     }
 
-    // Set format
-    struct v4l2_format fmt;
-    memset(&fmt, 0, sizeof(fmt));
-    fmt.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-    fmt.fmt.pix.width = 1920;
-    fmt.fmt.pix.height = 1080;
-    fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_YUV420;
-    fmt.fmt.pix.sizeimage = 1920 * 1080 * 3 / 2;
-    fmt.fmt.pix.field = V4L2_FIELD_NONE;
-
-    if (ioctl(fd, VIDIOC_S_FMT, &fmt) < 0) {
-        std::cerr << "Failed to set format" << std::endl;
-        close(fd);
-        return 1;
-    }
-
-    // Initialize Kinect
     libfreenect2::Freenect2 freenect2;
-    libfreenect2::Freenect2Device *dev = nullptr;
-    libfreenect2::PacketPipeline *pipeline = nullptr;
-
     if (freenect2.enumerateDevices() == 0) {
-        std::cerr << "No Kinect device found!" << std::endl;
-        close(fd);
+        std::cerr << "No Kinect v2 device found" << std::endl;
         return 1;
     }
 
-    std::string serial = freenect2.getDefaultDeviceSerialNumber();
-    
-    // Try different pipelines for better performance
-    pipeline = new libfreenect2::CpuPacketPipeline();
-    
-    dev = freenect2.openDevice(serial, pipeline);
-    if (!dev) {
-        std::cerr << "Failed to open Kinect device!" << std::endl;
-        close(fd);
+    const std::string serial = freenect2.getDefaultDeviceSerialNumber();
+    auto pipeline = make_pipeline(config.pipeline);
+    libfreenect2::Freenect2Device *device = freenect2.openDevice(serial, pipeline.get());
+    if (!device) {
+        std::cerr << "Failed to open Kinect device" << std::endl;
         return 1;
     }
 
-    // Setup listener for color only
-    libfreenect2::SyncMultiFrameListener listener(libfreenect2::Frame::Color);
+    int frame_types = 0;
+    if (config.enable_color) frame_types |= libfreenect2::Frame::Color;
+    if (config.enable_ir) frame_types |= libfreenect2::Frame::Ir;
+    if (config.enable_depth) frame_types |= libfreenect2::Frame::Depth;
+
+    libfreenect2::SyncMultiFrameListener listener(frame_types);
     libfreenect2::FrameMap frames;
-    dev->setColorFrameListener(&listener);
+    if (config.enable_color) device->setColorFrameListener(&listener);
+    if (config.enable_ir || config.enable_depth) device->setIrAndDepthFrameListener(&listener);
 
-    // Start device
-    if (!dev->startStreams(true, false)) {  // RGB only, no depth
-        std::cerr << "Failed to start streams!" << std::endl;
-        dev->close();
-        close(fd);
+    if (!device->startStreams(config.enable_color, config.enable_ir || config.enable_depth)) {
+        std::cerr << "Failed to start Kinect streams" << std::endl;
+        device->close();
         return 1;
     }
 
-    std::cout << "Kinect started, streaming to " << device_path << std::endl;
-    std::cout << "No window needed - direct streaming!" << std::endl;
-    std::cout << "Press Ctrl+C to stop" << std::endl;
+    OutputDevice color_output{"color", config.color_label, config.color_device, config.color_width, config.color_height};
+    OutputDevice ir_output{"ir", config.ir_label, config.ir_device, config.ir_width, config.ir_height};
+    OutputDevice depth_output{"depth", config.depth_label, config.depth_device, config.depth_width, config.depth_height};
 
-    signal(SIGINT, sighandler);
+    if (config.enable_color && !configure_output(color_output)) return 1;
+    if (config.enable_ir && !configure_output(ir_output)) return 1;
+    if (config.enable_depth && !configure_output(depth_output)) return 1;
 
-    // Allocate YUV buffer
-    size_t yuv_size = 1920 * 1080 * 3 / 2;
-    uint8_t *yuv_buffer = new uint8_t[yuv_size];
+    std::signal(SIGINT, handle_signal);
+    std::signal(SIGTERM, handle_signal);
 
-    while (!stop) {
+    while (!stop_requested) {
         if (!listener.waitForNewFrame(frames, 10 * 1000)) {
             std::cerr << "Timeout waiting for frames" << std::endl;
             continue;
         }
 
-        libfreenect2::Frame *rgb = frames[libfreenect2::Frame::Color];
-        
-        // Convert BGRX to YUV420
-        convertBGRXtoYUV420((uint8_t*)rgb->data, yuv_buffer, 1920, 1080);
-        
-        // Write to V4L2 device
-        if (write(fd, yuv_buffer, yuv_size) < 0) {
-            std::cerr << "Failed to write to device" << std::endl;
+        if (config.enable_color) {
+            auto *frame = frames[libfreenect2::Frame::Color];
+            rgb_to_yuyv(frame->data, color_output.buffer, config.color_width, config.color_height);
+            color_output.write_frame();
         }
-        
+
+        if (config.enable_ir) {
+            auto *frame = frames[libfreenect2::Frame::Ir];
+            auto grayscale = normalize_ir_frame(frame);
+            grayscale_to_yuyv(grayscale, ir_output.buffer);
+            ir_output.write_frame();
+        }
+
+        if (config.enable_depth) {
+            auto *frame = frames[libfreenect2::Frame::Depth];
+            auto depth_bgrx = colorize_depth_frame(frame, config.depth_min_mm, config.depth_max_mm);
+            rgb_to_yuyv(depth_bgrx.data(), depth_output.buffer, config.depth_width, config.depth_height);
+            depth_output.write_frame();
+        }
+
         listener.release(frames);
     }
 
-    delete[] yuv_buffer;
-    dev->stop();
-    dev->close();
-    close(fd);
-    delete pipeline;
-
+    color_output.close_device();
+    ir_output.close_device();
+    depth_output.close_device();
+    device->stop();
+    device->close();
     return 0;
 }

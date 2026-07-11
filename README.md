@@ -75,6 +75,14 @@ graph LR
 - v4l2loopback
 - JACK audio (for beamforming)
 
+## 📦 Bazzite Packaging
+
+For immutable Bazzite systems, use the host companion package plus the minimal Flatpak launcher described in [docs/BAZZITE.md](docs/BAZZITE.md).
+
+- Host package: installs `openkinect-v2d`, the systemd service, and audio helper scripts
+- Flatpak launcher: forwards start/stop/status commands to the host with `flatpak-spawn --host`
+- Streams are discovered by labels (`Kinect_Color`, `Kinect_IR`, `Kinect_Depth`) instead of fixed device numbers
+
 ## 🔧 Installation
 
 ```bash
