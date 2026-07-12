@@ -204,10 +204,19 @@ if [[ "$ENABLE_SERVICE" -eq 1 ]]; then
 fi
 
 if [[ "$ENABLE_AUDIO_SERVICE" -eq 1 ]]; then
-  log "Reloading user systemd units for openkinect-audio.service"
-  systemctl --user daemon-reload || true
-  log "Enabling and starting openkinect-audio.service for the current user"
-  systemctl --user enable --now openkinect-audio.service || true
+  if [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
+    log "Reloading user systemd units for openkinect-audio.service"
+    if ! systemctl --user daemon-reload; then
+      log "Skipping openkinect-audio.service daemon-reload because no active user systemd session was found"
+    else
+      log "Enabling and starting openkinect-audio.service for the current user"
+      if ! systemctl --user enable --now openkinect-audio.service; then
+        log "Unable to enable openkinect-audio.service automatically; start it later with systemctl --user enable --now openkinect-audio.service"
+      fi
+    fi
+  else
+    log "Skipping openkinect-audio.service enablement because XDG_RUNTIME_DIR is unavailable"
+  fi
 fi
 
 log "Host installation complete"

@@ -279,6 +279,18 @@ struct DirectionEstimate {
     double confidence = 0.0;
 };
 
+std::string resolve_effective_output_mode(const std::string &requested_mode) {
+    if (requested_mode == "raw") {
+        return "raw";
+    }
+    if (requested_mode == "focused-mono") {
+        return "focused-mono";
+    }
+    // Stereo is a planned follow-up mode, so this milestone falls back to the
+    // focused-mono path while preserving the requested mode in runtime metadata.
+    return "focused-mono";
+}
+
 DirectionEstimate estimate_direction_gcc_phat(const float *samples,
                                               size_t frame_count,
                                               int channels,
@@ -359,8 +371,9 @@ DirectionEstimate estimate_direction_gcc_phat(const float *samples,
     fftwf_destroy_plan(inverse_plan);
 
     const double aperture_m = std::max(1e-6, (static_cast<double>(channels) - 1.0) * mic_spacing_mm / 1000.0);
-    const int max_lag = std::max(1, static_cast<int>(std::ceil(
-        std::sin(max_abs_azimuth_deg * kPi / 180.0) * aperture_m * static_cast<double>(sample_rate) / speed_of_sound_mps)));
+    const double max_abs_azimuth_rad = max_abs_azimuth_deg * kPi / 180.0;
+    const double max_time_delay_s = std::sin(max_abs_azimuth_rad) * aperture_m / speed_of_sound_mps;
+    const int max_lag = std::max(1, static_cast<int>(std::ceil(max_time_delay_s * static_cast<double>(sample_rate))));
 
     double best_value = -1.0;
     double mean_value = 0.0;
@@ -487,8 +500,9 @@ class AudioDaemon {
 public:
     explicit AudioDaemon(Config config)
         : config_(std::move(config)),
-          effective_output_mode_(config_.audio_output_mode == "raw" ? "raw" : "focused-mono"),
-          smoothed_azimuth_deg_(config_.audio_manual_azimuth_deg) {
+          effective_output_mode_(resolve_effective_output_mode(config_.audio_output_mode)),
+          smoothed_azimuth_deg_(config_.audio_manual_azimuth_deg),
+          max_buffered_samples_(static_cast<size_t>(config_.audio_sample_rate) * kMaxBufferedAudioSeconds) {
         capture_events_.version = PW_VERSION_STREAM_EVENTS;
         capture_events_.process = &AudioDaemon::on_capture_process;
         output_events_.version = PW_VERSION_STREAM_EVENTS;
@@ -756,9 +770,8 @@ private:
                 // Keep at most ~2 seconds of focused-mono audio buffered. If no client is
                 // consuming the virtual source, the daemon drops the oldest samples first
                 // so capture and azimuth estimation can continue without unbounded growth.
-                const size_t max_buffered_samples = static_cast<size_t>(config_.audio_sample_rate) * kMaxBufferedAudioSeconds;
                 mono_queue_.insert(mono_queue_.end(), mono.begin(), mono.end());
-                while (mono_queue_.size() > max_buffered_samples) {
+                while (mono_queue_.size() > max_buffered_samples_) {
                     mono_queue_.pop_front();
                 }
             }
@@ -878,6 +891,7 @@ private:
     double last_confidence_ = 0.0;
     double last_rms_ = 0.0;
     bool last_voice_active_ = false;
+    size_t max_buffered_samples_ = 0;
     uint64_t last_update_ms_ = 0;
     uint64_t last_state_write_ms_ = 0;
 };

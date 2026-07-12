@@ -89,7 +89,10 @@ set_audio_mode() {
     -e "s/^AUDIO_OUTPUT_MODE=.*/AUDIO_OUTPUT_MODE=$mode/" \
     "$CONFIG_FILE"
 
-  exec systemctl --user restart "$AUDIO_SERVICE"
+  if ! systemctl --user restart "$AUDIO_SERVICE"; then
+    echo "Failed to restart $AUDIO_SERVICE after updating AUDIO_OUTPUT_MODE" >&2
+    exit 1
+  fi
 }
 
 command="${1:-status}"

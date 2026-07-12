@@ -26,6 +26,11 @@ if [[ "$MODE" == "status" ]]; then
   show_pipewire_node
 fi
 
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required for openkinect-audio-status.sh" >&2
+  exit 1
+fi
+
 python3 - "$CONFIG_FILE" "$MODE" <<'PY'
 import json
 import os
@@ -58,7 +63,7 @@ try:
 except FileNotFoundError:
     state = None
 except json.JSONDecodeError as exc:
-    print(f"Audio state file is invalid: {exc}", file=sys.stderr)
+    print(f"Audio state file is invalid ({state_path}): {exc}", file=sys.stderr)
     sys.exit(1)
 
 if mode == "direction":
