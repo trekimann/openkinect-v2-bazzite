@@ -32,17 +32,17 @@ On Bazzite, `./install.sh` can be launched from the host or from a distrobox/dev
 
 ## 🎙️ Audio Features
 
-### Current (Basic USB Audio)
-- 4-channel raw audio capture
-- Very quiet (-20dB vs Windows)
-- No directional processing
+### Current
+- 4-channel raw PipeWire capture from the Kinect microphone array
+- `openkinect-audiod` user service for focused mono processing
+- Delay-and-sum beamforming with AGC for a conferencing-friendly virtual microphone
+- GCC-PHAT azimuth estimates exported as runtime metadata for future speaker-focus video work
 
-### Coming Soon (Software Beamforming)
-- **Directional audio** - focus on speaker, reject noise
-- **Auto gain** - normalizes quiet Kinect audio
-- **Noise suppression** - reduces background sounds
-- **Voice tracking** - follows active speaker
-- **Low latency** - <20ms processing delay
+### Planned next audio steps
+- Optional noise suppression
+- Stereo output mode
+- Stronger multi-speaker arbitration
+- Speaker-focus video output driven by the shared audio metadata
 
 ## 📋 Requirements
 
@@ -69,13 +69,13 @@ graph LR
 - Linux kernel 4.4+ (Ubuntu 20.04+ recommended)
 - libfreenect2
 - v4l2loopback
-- JACK audio (for beamforming)
+- PipeWire
 
 ## 📦 Bazzite Packaging
 
 For immutable Bazzite systems, use the host companion package plus the minimal Flatpak launcher described in [docs/BAZZITE.md](docs/BAZZITE.md).
 
-- Host package: installs `openkinect-v2d`, the systemd service, and audio helper scripts
+- Host package: installs `openkinect-v2d`, `openkinect-audiod`, the systemd/user services, and audio helper scripts
 - Flatpak launcher: forwards start/stop/status commands to the host with `flatpak-spawn --host`
 - Streams are discovered by labels (`Kinect_Color`, `Kinect_IR`, `Kinect_Depth`) instead of fixed device numbers
 

@@ -1,0 +1,17 @@
+[Unit]
+Description=OpenKinect v2 PipeWire audio service
+After=pipewire.service
+Wants=pipewire.service
+
+[Service]
+Type=simple
+EnvironmentFile=-@OPENKINECT_CONFIG_FILE@
+ExecStart=@OPENKINECT_AUDIO_BIN_PATH@ --config @OPENKINECT_CONFIG_FILE@
+Restart=on-failure
+RestartSec=2
+RuntimeDirectory=openkinect-v2
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

@@ -127,6 +127,7 @@ host_packages=(
   libusb1-devel
   make
   ninja-build
+  pipewire-devel
   pkgconf-pkg-config
   turbojpeg-devel
 )
@@ -200,6 +201,14 @@ if [[ "$ENABLE_SERVICE" -eq 1 ]]; then
   sudo systemctl enable --now openkinect-v2.service
 fi
 
+if [[ "$ENABLE_SERVICE" -eq 1 ]]; then
+  log "Reloading user systemd units for openkinect-audio.service"
+  systemctl --user daemon-reload || true
+  log "Enabling and starting openkinect-audio.service for the current user"
+  systemctl --user enable --now openkinect-audio.service || true
+fi
+
 log "Host installation complete"
 log "Check service state with: sudo systemctl status openkinect-v2.service"
+log "Check audio state with: systemctl --user status openkinect-audio.service"
 log "Review config at: /etc/openkinect-v2/openkinect-v2.conf"

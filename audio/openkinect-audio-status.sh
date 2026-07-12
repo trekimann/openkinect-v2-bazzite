@@ -1,22 +1,85 @@
 #!/bin/bash
 set -euo pipefail
 
-echo "=== OpenKinect v2 Audio Status ==="
-DEVICE_NAME_PATTERN="Xbox NUI Sensor"
+CONFIG_FILE="${OPENKINECT_CONFIG:-/etc/openkinect-v2/openkinect-v2.conf}"
+AUDIO_SERVICE="${OPENKINECT_AUDIO_SERVICE:-openkinect-audio.service}"
+MODE="${1:-status}"
+DEVICE_NAME_PATTERN="${OPENKINECT_AUDIO_MATCH:-Xbox NUI Sensor}"
 
-if arecord -l | grep -q "$DEVICE_NAME_PATTERN"; then
-  CARD_NUM=$(arecord -l | sed -n "s/^card \\([0-9]\\+\\): ${DEVICE_NAME_PATTERN}.*/\\1/p" | head -1)
-  echo "ALSA card: ${CARD_NUM:-unknown}"
-else
-  echo "ALSA card: not detected"
+show_pipewire_node() {
+  if ! command -v pw-cli >/dev/null 2>&1; then
+    echo "PipeWire node: unavailable (pw-cli not installed)"
+    return
+  fi
+
+  local node_name
+  node_name="$(pw-cli list-objects 2>/dev/null | grep -A5 "$DEVICE_NAME_PATTERN" | grep "node.name" | grep "alsa_input" | cut -d'"' -f2 | head -1 || true)"
+  echo "PipeWire raw source: ${node_name:-not detected}"
+}
+
+if [[ "$MODE" == "status" ]]; then
+  echo "=== OpenKinect v2 Audio Status ==="
+  if command -v systemctl >/dev/null 2>&1; then
+    echo "User service state: $(systemctl --user is-active "$AUDIO_SERVICE" 2>/dev/null || echo inactive)"
+    echo "User service enabled: $(systemctl --user is-enabled "$AUDIO_SERVICE" 2>/dev/null || echo disabled)"
+  fi
+  show_pipewire_node
 fi
 
-if command -v pw-cli >/dev/null 2>&1; then
-  NODE_NAME=$(pw-cli list-objects | grep -A5 "$DEVICE_NAME_PATTERN" | grep "node.name" | grep "alsa_input" | cut -d'"' -f2 | head -1 || true)
-  echo "PipeWire node: ${NODE_NAME:-not detected}"
-elif command -v pactl >/dev/null 2>&1; then
-  SOURCE_NAME=$(pactl list sources | grep -B2 "$DEVICE_NAME_PATTERN" | grep "Name:" | awk '{print $2}' | head -1 || true)
-  echo "PulseAudio source: ${SOURCE_NAME:-not detected}"
-else
-  echo "PipeWire/PulseAudio tools: unavailable"
-fi
+python3 - "$CONFIG_FILE" "$MODE" <<'PY'
+import json
+import os
+import sys
+
+config_path = sys.argv[1]
+mode = sys.argv[2]
+
+config = {}
+try:
+    with open(config_path, encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            config[key.strip()] = value.strip().strip('"')
+except FileNotFoundError:
+    pass
+
+state_path = config.get("AUDIO_STATE_PATH") or os.path.join(
+    os.environ.get("XDG_RUNTIME_DIR", "/tmp"),
+    "openkinect-v2",
+    "audio-state.json",
+)
+
+try:
+    with open(state_path, encoding="utf-8") as handle:
+        state = json.load(handle)
+except FileNotFoundError:
+    state = None
+except json.JSONDecodeError as exc:
+    print(f"Audio state file is invalid: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+if mode == "direction":
+    if state is None:
+        print(f"Audio direction metadata unavailable: {state_path}", file=sys.stderr)
+        sys.exit(1)
+    print(json.dumps(state, indent=2, sort_keys=True))
+    sys.exit(0)
+
+print(f"Audio state file: {state_path}")
+print(f"Configured output mode: {config.get('AUDIO_OUTPUT_MODE', 'focused-mono')}")
+print(f"Configured steering mode: {config.get('AUDIO_STEERING_MODE', 'auto')}")
+if state is None:
+    print("Runtime metadata: not available")
+    sys.exit(0)
+
+print(f"Effective output mode: {state.get('effective_output_mode', 'unknown')}")
+print(f"Focused source enabled: {state.get('focused_source_enabled', False)}")
+print(f"Azimuth: {state.get('azimuth_deg', 0.0)} deg")
+print(f"Confidence: {state.get('confidence', 0.0)}")
+print(f"Voice active: {state.get('voice_active', False)}")
+print(f"Input RMS: {state.get('input_rms', 0.0)}")
+print(f"Focused node name: {state.get('focused_node_name', '')}")
+PY

@@ -36,7 +36,7 @@ The host must provide:
 
 - `libfreenect2`
 - `v4l2loopback`
-- `PipeWire` or PulseAudio utilities for audio helpers
+- `PipeWire`
 
 On Fedora/Bazzite, `akmod-v4l2loopback` is the expected module package once RPM Fusion is enabled on the host.
 
@@ -47,7 +47,7 @@ For a first compile in a Fedora or Bazzite development shell, install the native
 ```bash
 sudo dnf install -y \
 	cmake gcc-c++ make ninja-build pkgconf-pkg-config \
-	libusb1-devel turbojpeg-devel
+	libusb1-devel pipewire-devel turbojpeg-devel
 ```
 
 `libfreenect2` is not assumed to be available as a packaged development dependency, so build a minimal local copy into `/usr/local`:
@@ -77,6 +77,13 @@ cmake -S . -B build -G Ninja
 cmake --build build
 ```
 
+To iterate on the audio service without a local `libfreenect2` install, you can build the PipeWire daemon by itself:
+
+```bash
+cmake -S . -B build-audio -G Ninja -DOPENKINECT_BUILD_CAMERA=OFF
+cmake --build build-audio
+```
+
 If you run `./build/openkinect-v2d` directly from a containerized development shell, USB access may still fail with `LIBUSB_ERROR_ACCESS`. The expected Bazzite runtime path is the host companion install plus the systemd service, which owns `v4l2loopback` setup and runs with host-level device access.
 
 ## Stream labels
@@ -89,9 +96,13 @@ When enabled, the host runner provisions labeled loopback devices:
 
 Applications can discover the stream they need by label instead of relying on fixed `/dev/videoN` paths.
 
-## Audio helpers
+## Audio service and helpers
 
-The host package installs microphone helper scripts in `/usr/libexec/openkinect-v2/`.
+The host package installs:
+
+- `openkinect-audiod` as a **user** systemd service (`openkinect-audio.service`)
+- microphone helper scripts in `/usr/libexec/openkinect-v2/`
+- a runtime metadata file under `${XDG_RUNTIME_DIR}/openkinect-v2/audio-state.json` by default
 
 Useful commands:
 
@@ -99,10 +110,20 @@ Useful commands:
 /usr/libexec/openkinect-v2/openkinect-audio-status.sh
 /usr/libexec/openkinect-v2/kinect-audio-setup.sh
 /usr/libexec/openkinect-v2/kinect-record.sh 5 sample.wav
+/usr/local/libexec/openkinect-v2/openkinect-v2-hostctl.sh audio-start
+/usr/local/libexec/openkinect-v2/openkinect-v2-hostctl.sh audio-status
+/usr/local/libexec/openkinect-v2/openkinect-v2-hostctl.sh audio-direction
+/usr/local/libexec/openkinect-v2/openkinect-v2-hostctl.sh audio-mode focused-mono
 /usr/local/libexec/openkinect-v2/openkinect-v2-hostctl.sh restart
 /usr/local/libexec/openkinect-v2/openkinect-v2-hostctl.sh mode color
 /usr/local/libexec/openkinect-v2/openkinect-v2-hostctl.sh mode ir
 /usr/local/libexec/openkinect-v2/openkinect-v2-hostctl.sh mode depth
+```
+
+Enable the audio service for the current desktop user:
+
+```bash
+systemctl --user enable --now openkinect-audio.service
 ```
 
 ## Flatpak launcher
@@ -113,7 +134,10 @@ The first Flatpak release is intentionally minimal. It forwards control actions 
 flatpak run org.openkinect.OpenKinectV2 status
 flatpak run org.openkinect.OpenKinectV2 start
 flatpak run org.openkinect.OpenKinectV2 stop
+flatpak run org.openkinect.OpenKinectV2 audio-start
 flatpak run org.openkinect.OpenKinectV2 audio-status
+flatpak run org.openkinect.OpenKinectV2 audio-direction
+flatpak run org.openkinect.OpenKinectV2 audio-mode focused-mono
 flatpak run org.openkinect.OpenKinectV2 mode color
 flatpak run org.openkinect.OpenKinectV2 mode ir
 flatpak run org.openkinect.OpenKinectV2 mode depth

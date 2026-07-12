@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SERVICE="${OPENKINECT_SERVICE:-openkinect-v2.service}"
+AUDIO_SERVICE="${OPENKINECT_AUDIO_SERVICE:-openkinect-audio.service}"
 AUDIO_STATUS_SCRIPT="${OPENKINECT_AUDIO_STATUS:-@OPENKINECT_AUDIO_STATUS_PATH@}"
 CONFIG_FILE="${OPENKINECT_CONFIG:-@OPENKINECT_CONFIG_FILE@}"
 
@@ -27,7 +28,7 @@ safe_config_path() {
 
 usage() {
   cat <<USAGE
-Usage: $(basename "$0") [start|stop|restart|status|logs|audio-status|config|mode <color|ir|depth|all>]
+Usage: $(basename "$0") [start|stop|restart|status|logs|audio-start|audio-stop|audio-restart|audio-status|audio-logs|audio-direction|audio-mode <raw|focused-mono|stereo>|config|mode <color|ir|depth|all>]
 USAGE
 }
 
@@ -70,6 +71,27 @@ set_mode() {
   exec sudo systemctl restart "$SERVICE"
 }
 
+set_audio_mode() {
+  local mode="$1"
+
+  case "$mode" in
+    raw|focused-mono|stereo) ;;
+    *)
+      echo "Unknown audio mode: $mode" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+
+  safe_config_path
+
+  sudo sed -i \
+    -e "s/^AUDIO_OUTPUT_MODE=.*/AUDIO_OUTPUT_MODE=$mode/" \
+    "$CONFIG_FILE"
+
+  exec systemctl --user restart "$AUDIO_SERVICE"
+}
+
 command="${1:-status}"
 case "$command" in
   start|stop|restart|status)
@@ -78,12 +100,24 @@ case "$command" in
   logs)
     exec journalctl -u "$SERVICE" -n "${2:-100}" --no-pager
     ;;
+  audio-start|audio-stop|audio-restart)
+    exec systemctl --user "${command#audio-}" "$AUDIO_SERVICE"
+    ;;
+  audio-logs)
+    exec journalctl --user -u "$AUDIO_SERVICE" -n "${2:-100}" --no-pager
+    ;;
   audio-status)
     exec "$AUDIO_STATUS_SCRIPT"
+    ;;
+  audio-direction)
+    exec "$AUDIO_STATUS_SCRIPT" direction
     ;;
   config)
     safe_config_path
     exec sed -n '/^[A-Z_][A-Z0-9_]*=.*/p' "$CONFIG_FILE"
+    ;;
+  audio-mode)
+    set_audio_mode "${2:-}"
     ;;
   mode)
     set_mode "${2:-}"
