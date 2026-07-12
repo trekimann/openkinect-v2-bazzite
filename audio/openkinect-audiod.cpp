@@ -33,6 +33,9 @@ constexpr int kDefaultInputChannels = 4;
 constexpr double kDefaultMicSpacingMm = 75.0;
 constexpr size_t kStateWriteIntervalMs = 100;
 constexpr size_t kMaxBufferedAudioSeconds = 2;
+constexpr double kMinApertureMeters = 1e-6;
+constexpr float kMinSpectrumMagnitude = 1e-9f;
+constexpr double kAgcSilenceThreshold = 1e-6;
 
 volatile sig_atomic_t g_stop_requested = 0;
 
@@ -361,7 +364,7 @@ DirectionEstimate estimate_direction_gcc_phat(const float *samples,
     for (size_t k = 0; k < spectrum_size; ++k) {
         const float real = left_freq[k][0] * right_freq[k][0] + left_freq[k][1] * right_freq[k][1];
         const float imag = left_freq[k][1] * right_freq[k][0] - left_freq[k][0] * right_freq[k][1];
-        const float magnitude = std::max(std::hypot(real, imag), 1e-9f);
+        const float magnitude = std::max(std::hypot(real, imag), kMinSpectrumMagnitude);
         cross_spectrum[k][0] = real / magnitude;
         cross_spectrum[k][1] = imag / magnitude;
     }
@@ -370,7 +373,7 @@ DirectionEstimate estimate_direction_gcc_phat(const float *samples,
     fftwf_destroy_plan(right_plan);
     fftwf_destroy_plan(inverse_plan);
 
-    const double aperture_m = std::max(1e-6, (static_cast<double>(channels) - 1.0) * mic_spacing_mm / 1000.0);
+    const double aperture_m = std::max(kMinApertureMeters, (static_cast<double>(channels) - 1.0) * mic_spacing_mm / 1000.0);
     const double max_abs_azimuth_rad = max_abs_azimuth_deg * kPi / 180.0;
     const double max_time_delay_s = std::sin(max_abs_azimuth_rad) * aperture_m / speed_of_sound_mps;
     const int max_lag = std::max(1, static_cast<int>(std::ceil(max_time_delay_s * static_cast<double>(sample_rate))));
@@ -471,7 +474,7 @@ void apply_agc(std::vector<float> &samples, double target_rms, double max_gain) 
     }
 
     const double rms = std::sqrt(energy / static_cast<double>(samples.size()));
-    if (rms <= 1e-6) {
+    if (rms <= kAgcSilenceThreshold) {
         return;
     }
 

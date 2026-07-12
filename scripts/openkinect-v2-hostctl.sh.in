@@ -89,6 +89,9 @@ set_audio_mode() {
     -e "s/^AUDIO_OUTPUT_MODE=.*/AUDIO_OUTPUT_MODE=$mode/" \
     "$CONFIG_FILE"
 
+  # The audio daemon is a user service because it must connect to the caller's
+  # PipeWire session, so restart the current user's instance after updating the
+  # shared host config.
   if ! systemctl --user restart "$AUDIO_SERVICE"; then
     echo "Failed to restart $AUDIO_SERVICE after updating AUDIO_OUTPUT_MODE" >&2
     exit 1
