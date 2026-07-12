@@ -32,6 +32,7 @@ constexpr int kDefaultSampleRate = 16000;
 constexpr int kDefaultInputChannels = 4;
 constexpr double kDefaultMicSpacingMm = 75.0;
 constexpr size_t kStateWriteIntervalMs = 100;
+constexpr size_t kMaxBufferedAudioSeconds = 2;
 
 volatile sig_atomic_t g_stop_requested = 0;
 
@@ -348,7 +349,7 @@ DirectionEstimate estimate_direction_gcc_phat(const float *samples,
     for (size_t k = 0; k < spectrum_size; ++k) {
         const float real = left_freq[k][0] * right_freq[k][0] + left_freq[k][1] * right_freq[k][1];
         const float imag = left_freq[k][1] * right_freq[k][0] - left_freq[k][0] * right_freq[k][1];
-        const float magnitude = std::max(std::sqrt(real * real + imag * imag), 1e-9f);
+        const float magnitude = std::max(std::hypot(real, imag), 1e-9f);
         cross_spectrum[k][0] = real / magnitude;
         cross_spectrum[k][1] = imag / magnitude;
     }
@@ -431,12 +432,13 @@ std::vector<float> beamform_to_mono(const float *samples,
     const double angle = std::clamp(azimuth_deg, -90.0, 90.0) * kPi / 180.0;
     const double spacing_m = mic_spacing_mm / 1000.0;
     const double center = (static_cast<double>(channels) - 1.0) / 2.0;
+    const double sin_angle = std::sin(angle);
 
     for (size_t sample = 0; sample < frame_count; ++sample) {
         double mixed = 0.0;
         for (int channel = 0; channel < channels; ++channel) {
             const double position = (static_cast<double>(channel) - center) * spacing_m;
-            const double delay_samples = -(position * std::sin(angle) * static_cast<double>(sample_rate)) / speed_of_sound_mps;
+            const double delay_samples = -(position * sin_angle * static_cast<double>(sample_rate)) / speed_of_sound_mps;
             mixed += interpolate_channel_sample(samples, frame_count, channels, channel, static_cast<double>(sample) + delay_samples);
         }
         mono[sample] = static_cast<float>(mixed / static_cast<double>(channels));
@@ -598,8 +600,9 @@ private:
         info.rate = static_cast<uint32_t>(config_.audio_sample_rate);
         info.channels = static_cast<uint32_t>(config_.audio_input_channels);
         // The Linux Kinect v2 source typically exposes four channels in FL/FR/FC/LFE
-        // order even though the hardware is a linear microphone array. Phase 0
-        // calibration can tighten this mapping later without changing the daemon API.
+        // order even though the hardware is a linear microphone array. The initial
+        // calibration work described in docs/MICROPHONE-SPEAKER-FOCUS-IMPLEMENTATION-PLAN.md
+        // can tighten this mapping later without changing the daemon API.
         info.position[0] = SPA_AUDIO_CHANNEL_FL;
         info.position[1] = SPA_AUDIO_CHANNEL_FR;
         info.position[2] = SPA_AUDIO_CHANNEL_FC;
@@ -753,7 +756,7 @@ private:
                 // Keep at most ~2 seconds of focused-mono audio buffered. If no client is
                 // consuming the virtual source, the daemon drops the oldest samples first
                 // so capture and azimuth estimation can continue without unbounded growth.
-                const size_t max_buffered_samples = static_cast<size_t>(config_.audio_sample_rate) * 2U;
+                const size_t max_buffered_samples = static_cast<size_t>(config_.audio_sample_rate) * kMaxBufferedAudioSeconds;
                 mono_queue_.insert(mono_queue_.end(), mono.begin(), mono.end());
                 while (mono_queue_.size() > max_buffered_samples) {
                     mono_queue_.pop_front();
