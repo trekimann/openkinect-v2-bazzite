@@ -1,3 +1,4 @@
+#include <fftw3.h>
 #include <pipewire/pipewire.h>
 #include <spa/param/audio/format-utils.h>
 #include <spa/utils/result.h>
@@ -5,7 +6,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <complex>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -310,20 +310,52 @@ DirectionEstimate estimate_direction_gcc_phat(const float *samples,
         right[i] = samples[i * static_cast<size_t>(channels) + static_cast<size_t>(right_channel)] - right_mean;
     }
 
-    std::vector<std::complex<double>> cross_spectrum(fft_size, std::complex<double>(0.0, 0.0));
-    for (size_t k = 0; k < fft_size; ++k) {
-        std::complex<double> left_bin(0.0, 0.0);
-        std::complex<double> right_bin(0.0, 0.0);
-        for (size_t n = 0; n < fft_size; ++n) {
-            const double angle = -2.0 * kPi * static_cast<double>(k * n) / static_cast<double>(fft_size);
-            const std::complex<double> basis(std::cos(angle), std::sin(angle));
-            left_bin += left[n] * basis;
-            right_bin += right[n] * basis;
-        }
-        const std::complex<double> value = left_bin * std::conj(right_bin);
-        const double magnitude = std::max(std::abs(value), 1e-9);
-        cross_spectrum[k] = value / magnitude;
+    std::vector<float> left_time(fft_size, 0.0f);
+    std::vector<float> right_time(fft_size, 0.0f);
+    for (size_t i = 0; i < fft_size; ++i) {
+        left_time[i] = static_cast<float>(left[i]);
+        right_time[i] = static_cast<float>(right[i]);
     }
+
+    const size_t spectrum_size = fft_size / 2 + 1;
+    std::vector<fftwf_complex> left_freq(spectrum_size);
+    std::vector<fftwf_complex> right_freq(spectrum_size);
+    std::vector<fftwf_complex> cross_spectrum(spectrum_size);
+    std::vector<float> correlation_time(fft_size, 0.0f);
+
+    fftwf_plan left_plan = fftwf_plan_dft_r2c_1d(static_cast<int>(fft_size),
+                                                 left_time.data(),
+                                                 left_freq.data(),
+                                                 FFTW_ESTIMATE);
+    fftwf_plan right_plan = fftwf_plan_dft_r2c_1d(static_cast<int>(fft_size),
+                                                  right_time.data(),
+                                                  right_freq.data(),
+                                                  FFTW_ESTIMATE);
+    fftwf_plan inverse_plan = fftwf_plan_dft_c2r_1d(static_cast<int>(fft_size),
+                                                    cross_spectrum.data(),
+                                                    correlation_time.data(),
+                                                    FFTW_ESTIMATE);
+
+    if (left_plan == nullptr || right_plan == nullptr || inverse_plan == nullptr) {
+        if (left_plan != nullptr) fftwf_destroy_plan(left_plan);
+        if (right_plan != nullptr) fftwf_destroy_plan(right_plan);
+        if (inverse_plan != nullptr) fftwf_destroy_plan(inverse_plan);
+        return estimate;
+    }
+
+    fftwf_execute(left_plan);
+    fftwf_execute(right_plan);
+    for (size_t k = 0; k < spectrum_size; ++k) {
+        const float real = left_freq[k][0] * right_freq[k][0] + left_freq[k][1] * right_freq[k][1];
+        const float imag = left_freq[k][1] * right_freq[k][0] - left_freq[k][0] * right_freq[k][1];
+        const float magnitude = std::max(std::sqrt(real * real + imag * imag), 1e-9f);
+        cross_spectrum[k][0] = real / magnitude;
+        cross_spectrum[k][1] = imag / magnitude;
+    }
+    fftwf_execute(inverse_plan);
+    fftwf_destroy_plan(left_plan);
+    fftwf_destroy_plan(right_plan);
+    fftwf_destroy_plan(inverse_plan);
 
     const double aperture_m = std::max(1e-6, (static_cast<double>(channels) - 1.0) * mic_spacing_mm / 1000.0);
     const int max_lag = std::max(1, static_cast<int>(std::ceil(
@@ -339,13 +371,7 @@ DirectionEstimate estimate_direction_gcc_phat(const float *samples,
             ? static_cast<size_t>(lag)
             : fft_size - static_cast<size_t>(-lag);
 
-        std::complex<double> correlation(0.0, 0.0);
-        for (size_t k = 0; k < fft_size; ++k) {
-            const double angle = 2.0 * kPi * static_cast<double>(k * output_index) / static_cast<double>(fft_size);
-            correlation += cross_spectrum[k] * std::complex<double>(std::cos(angle), std::sin(angle));
-        }
-
-        const double value = std::abs(correlation) / static_cast<double>(fft_size);
+        const double value = std::abs(static_cast<double>(correlation_time[output_index])) / static_cast<double>(fft_size);
         mean_value += value;
         ++samples_seen;
         if (value > best_value) {
@@ -571,6 +597,9 @@ private:
         info.format = SPA_AUDIO_FORMAT_F32;
         info.rate = static_cast<uint32_t>(config_.audio_sample_rate);
         info.channels = static_cast<uint32_t>(config_.audio_input_channels);
+        // The Linux Kinect v2 source typically exposes four channels in FL/FR/FC/LFE
+        // order even though the hardware is a linear microphone array. Phase 0
+        // calibration can tighten this mapping later without changing the daemon API.
         info.position[0] = SPA_AUDIO_CHANNEL_FL;
         info.position[1] = SPA_AUDIO_CHANNEL_FR;
         info.position[2] = SPA_AUDIO_CHANNEL_FC;
@@ -721,6 +750,9 @@ private:
 
             {
                 std::lock_guard<std::mutex> lock(queue_mutex_);
+                // Keep at most ~2 seconds of focused-mono audio buffered. If no client is
+                // consuming the virtual source, the daemon drops the oldest samples first
+                // so capture and azimuth estimation can continue without unbounded growth.
                 const size_t max_buffered_samples = static_cast<size_t>(config_.audio_sample_rate) * 2U;
                 mono_queue_.insert(mono_queue_.end(), mono.begin(), mono.end());
                 while (mono_queue_.size() > max_buffered_samples) {

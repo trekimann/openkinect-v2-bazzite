@@ -47,7 +47,7 @@ For a first compile in a Fedora or Bazzite development shell, install the native
 ```bash
 sudo dnf install -y \
 	cmake gcc-c++ make ninja-build pkgconf-pkg-config \
-	libusb1-devel pipewire-devel turbojpeg-devel
+	fftw-devel libusb1-devel pipewire-devel turbojpeg-devel
 ```
 
 `libfreenect2` is not assumed to be available as a packaged development dependency, so build a minimal local copy into `/usr/local`:

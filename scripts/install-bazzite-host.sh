@@ -8,6 +8,7 @@ BUILD_DIR="${BUILD_DIR:-build-host}"
 LIBFREENECT2_DIR="${LIBFREENECT2_DIR:-$HOME/.cache/openkinect-v2/libfreenect2}"
 LIBFREENECT2_BUILD_DIR="${LIBFREENECT2_BUILD_DIR:-$LIBFREENECT2_DIR/build}"
 ENABLE_SERVICE="${OPENKINECT_ENABLE_SERVICE:-1}"
+ENABLE_AUDIO_SERVICE="${OPENKINECT_ENABLE_AUDIO_SERVICE:-$ENABLE_SERVICE}"
 REBUILD_LIBFREENECT2="${OPENKINECT_REBUILD_LIBFREENECT2:-0}"
 
 log() {
@@ -35,6 +36,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --no-start)
       ENABLE_SERVICE=0
+      ENABLE_AUDIO_SERVICE=0
       ;;
     --rebuild-libfreenect2)
       REBUILD_LIBFREENECT2=1
@@ -201,7 +203,7 @@ if [[ "$ENABLE_SERVICE" -eq 1 ]]; then
   sudo systemctl enable --now openkinect-v2.service
 fi
 
-if [[ "$ENABLE_SERVICE" -eq 1 ]]; then
+if [[ "$ENABLE_AUDIO_SERVICE" -eq 1 ]]; then
   log "Reloading user systemd units for openkinect-audio.service"
   systemctl --user daemon-reload || true
   log "Enabling and starting openkinect-audio.service for the current user"
