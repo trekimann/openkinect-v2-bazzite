@@ -185,6 +185,7 @@ Areas we need help:
 - [Camera Setup](docs/CAMERA.md)
 - [Audio Processing](docs/AUDIO.md)
 - [Depth Performance Roadmap](docs/DEPTH-PERFORMANCE-ROADMAP.md)
+- [Heart Rate Monitoring Roadmap](docs/HEART-RATE-MONITORING.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Technical Details](docs/TECHNICAL.md)
 
