@@ -23,7 +23,7 @@ cd openkinect-v2
 
 On Bazzite, `./install.sh` can be launched from the host or from a distrobox/dev container. If RPM Fusion is not already enabled, the first run stages the RPM Fusion release packages and asks for a reboot. A second run may then stage the remaining host packages and ask for one more reboot. The final run builds `libfreenect2`, installs the host service, and starts the default RGB webcam stream.
 
-After install, `flatpak run org.openkinect.OpenKinectV2` launches the current control panel. It defaults to `http://127.0.0.1:40123/`, opens your browser automatically, and exposes stream-mode switching plus a three-stop live depth palette editor for near, middle, and far colors. If `40123` is already in use, the app falls back to another local port and prints the active URL.
+After install, the host service is ready immediately. The browser-based control panel can be launched directly from the repo with `python3 packaging/flatpak/openkinect-control.py`. If you also build and install the Flatpak control app, `flatpak run org.openkinect.OpenKinectV2` launches the same control panel. It defaults to `http://127.0.0.1:40123/`, opens your browser automatically, and exposes stream-mode switching plus a three-stop live depth palette editor for near, middle, and far colors. If `40123` is already in use, the app falls back to another local port and prints the active URL.
 
 ## 📸 Camera Features
 
@@ -98,7 +98,7 @@ On current Bazzite systems the installer may need multiple runs because `rpm-ost
 
 The control panel is a local browser UI for the Bazzite host service.
 
-Launch it from the packaged control app:
+Launch it from the packaged control app if you have built and installed the Flatpak locally:
 
 ```bash
 flatpak run org.openkinect.OpenKinectV2

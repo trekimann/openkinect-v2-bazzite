@@ -174,19 +174,19 @@ Useful commands:
 
 The control app now opens a small local control panel by default. It reads host state through the existing host bridge and exposes stream mode plus live depth palette controls.
 
-Launch the control panel:
+Launch the control panel directly from the repo:
+
+```bash
+python3 packaging/flatpak/openkinect-control.py
+```
+
+If you have also built and installed the Flatpak control app locally, you can launch the same UI with:
 
 ```bash
 flatpak run org.openkinect.OpenKinectV2
 ```
 
 By default it serves the UI on `http://127.0.0.1:40123/`, opens that URL in your browser automatically, and falls back to another local port only if `40123` is already in use.
-
-You can also launch the same control panel directly from a dev container or local shell with:
-
-```bash
-python3 packaging/flatpak/openkinect-control.py
-```
 
 CLI forwarding still works for direct control commands:
 
