@@ -23,6 +23,8 @@ cd openkinect-v2
 
 On Bazzite, `./install.sh` can be launched from the host or from a distrobox/dev container. If RPM Fusion is not already enabled, the first run stages the RPM Fusion release packages and asks for a reboot. A second run may then stage the remaining host packages and ask for one more reboot. The final run builds `libfreenect2`, installs the host service, and starts the default RGB webcam stream.
 
+After install, `flatpak run org.openkinect.OpenKinectV2` launches the current control panel. It defaults to `http://127.0.0.1:40123/`, opens your browser automatically, and exposes stream-mode switching plus a three-stop live depth palette editor for near, middle, and far colors. If `40123` is already in use, the app falls back to another local port and prints the active URL.
+
 ## 📸 Camera Features
 
 - **1080p video** at 30fps
@@ -76,7 +78,7 @@ graph LR
 For immutable Bazzite systems, use the host companion package plus the minimal Flatpak launcher described in [docs/BAZZITE.md](docs/BAZZITE.md).
 
 - Host package: installs `openkinect-v2d`, the systemd service, and audio helper scripts
-- Flatpak launcher: forwards start/stop/status commands to the host with `flatpak-spawn --host`
+- Flatpak control app: launches a browser-based host control panel and still forwards CLI commands through the host bridge
 - Streams are discovered by labels (`Kinect_Color`, `Kinect_IR`, `Kinect_Depth`) instead of fixed device numbers
 
 ## 🔧 Installation
@@ -91,6 +93,39 @@ cd openkinect-v2
 ```
 
 On current Bazzite systems the installer may need multiple runs because `rpm-ostree` applies repository and package layering through new deployments. The current host bootstrap intentionally uses a CPU-only `libfreenect2` build path, so it avoids extra GL development packages that can conflict with Bazzite's Mesa exclusions. See [docs/BAZZITE.md](docs/BAZZITE.md) for the host flow.
+
+## 🕹️ Control Panel
+
+The control panel is a local browser UI for the Bazzite host service.
+
+Launch it from the packaged control app:
+
+```bash
+flatpak run org.openkinect.OpenKinectV2
+```
+
+Launch it directly from the repo in a dev container or shell:
+
+```bash
+python3 packaging/flatpak/openkinect-control.py
+```
+
+By default it listens on:
+
+```text
+http://127.0.0.1:40123/
+```
+
+If that port is busy, the app falls back to another local port and prints the URL to the terminal.
+
+Current controls:
+
+- Stream mode switching: `color`, `ir`, `depth`, or `all`
+- Live depth palette editing for `near`, `middle`, and `far` colors
+- Host service status display
+- Manual service restart
+
+Mode changes restart the service. Depth palette changes are applied live through the host control script without a full restart.
 
 ## 📁 Project Structure
 
@@ -121,11 +156,12 @@ This project brings it all together in one easy-to-use package.
 - Systemd service integration
 - Basic audio capture
 - Installation scripts
+- Live depth palette control
 
 ### 🔄 In Progress
 - Software beamforming implementation
 - Audio enhancement pipeline
-- GUI configuration tool
+- Control panel expansion
 
 ### 📋 Planned
 - Depth camera access
@@ -148,6 +184,7 @@ Areas we need help:
 - [Installation Guide](docs/INSTALL.md)
 - [Camera Setup](docs/CAMERA.md)
 - [Audio Processing](docs/AUDIO.md)
+- [Depth Performance Roadmap](docs/DEPTH-PERFORMANCE-ROADMAP.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Technical Details](docs/TECHNICAL.md)
 
