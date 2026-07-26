@@ -48,7 +48,7 @@ The repository already supports OpenCL/OpenGL packet pipeline selection through 
 
 ## Proposed first-pass scope
 
-### In scope
+### In Scope
 
 - optional rPPG feature flag and config surface
 - new augmented heart-rate loopback feed
@@ -59,7 +59,7 @@ The repository already supports OpenCL/OpenGL packet pipeline selection through 
 - UDP loopback stream for raw heart-rate values
 - confidence scoring and smoothing
 
-### Deferred or explicitly secondary
+### Deferred Features
 
 - production-quality multi-landmark mesh tracking
 - richer IPC protocols beyond simple UDP datagrams
