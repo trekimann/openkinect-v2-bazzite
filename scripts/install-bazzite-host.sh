@@ -9,7 +9,7 @@ LIBFREENECT2_DIR="${LIBFREENECT2_DIR:-$HOME/.cache/openkinect-v2/libfreenect2}"
 LIBFREENECT2_BUILD_DIR="${LIBFREENECT2_BUILD_DIR:-$LIBFREENECT2_DIR/build}"
 ENABLE_SERVICE="${OPENKINECT_ENABLE_SERVICE:-1}"
 REBUILD_LIBFREENECT2="${OPENKINECT_REBUILD_LIBFREENECT2:-0}"
-ENABLE_OPENCL="${OPENKINECT_ENABLE_OPENCL:-0}"
+ENABLE_OPENCL="${OPENKINECT_ENABLE_OPENCL:-1}"
 
 log() {
   printf '[openkinect-v2] %s\n' "$*"
@@ -31,7 +31,8 @@ Runs the Bazzite/Fedora host bootstrap flow.
 - After reboot, rerun the same command to build and install libfreenect2 and openkinect-v2.
 
 Environment flags:
-- `OPENKINECT_ENABLE_OPENCL=1` enables an experimental OpenCL build of libfreenect2.
+- `OPENKINECT_ENABLE_OPENCL=1` keeps OpenCL acceleration enabled for the host build.
+- `OPENKINECT_ENABLE_OPENCL=0` forces the older CPU-only libfreenect2 build path.
 USAGE
 }
 
@@ -45,6 +46,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --enable-opencl)
       ENABLE_OPENCL=1
+      ;;
+    --disable-opencl)
+      ENABLE_OPENCL=0
       ;;
     -h|--help)
       usage
@@ -247,4 +251,6 @@ log "Check service state with: sudo systemctl status openkinect-v2.service"
 log "Review config at: /etc/openkinect-v2/openkinect-v2.conf"
 if [[ "$ENABLE_OPENCL" -eq 1 ]]; then
   log "OpenCL build requested. Set PIPELINE=opencl in /etc/openkinect-v2/openkinect-v2.conf and restart the service to test GPU depth processing."
+else
+  log "OpenCL build disabled. CPU packet processing will be used unless the host config overrides PIPELINE."
 fi

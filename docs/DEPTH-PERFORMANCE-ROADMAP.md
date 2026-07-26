@@ -152,8 +152,8 @@ The final target machine is smaller than the current VM-backed development setup
 
 Status:
 
-- `OPENKINECT_ENABLE_OPENCL=1` has been wired into the Bazzite installer as the first experimental acceleration path.
-- The OpenCL path has now been validated on the Bazzite host with an NVIDIA RTX 5070.
+- The Bazzite installer now defaults to an OpenCL-enabled `libfreenect2` build on supported hosts.
+- The OpenCL path has been validated on the Bazzite host with an NVIDIA RTX 5070.
 - With `PIPELINE=opencl`, `OpenCLDepthPacketProcessor` is running at roughly `0.42-0.49ms` per cycle.
 - The prior CPU path was roughly `90-110ms` per cycle in `CpuDepthPacketProcessor`.
 - This confirms the primary depth bottleneck was packet processing in `libfreenect2`, and that moving that stage to OpenCL materially improves throughput.

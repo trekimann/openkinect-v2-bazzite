@@ -79,20 +79,22 @@ cmake --build build
 
 If you run `./build/openkinect-v2d` directly from a containerized development shell, USB access may still fail with `LIBUSB_ERROR_ACCESS`. The expected Bazzite runtime path is the host companion install plus the systemd service, which owns `v4l2loopback` setup and runs with host-level device access.
 
-For the next round of depth performance work, see [docs/DEPTH-PERFORMANCE-ROADMAP.md](docs/DEPTH-PERFORMANCE-ROADMAP.md). The current host bootstrap intentionally uses a CPU-only `libfreenect2` build for reliability, and that is now the main depth performance constraint.
+For the next round of depth performance work, see [docs/DEPTH-PERFORMANCE-ROADMAP.md](docs/DEPTH-PERFORMANCE-ROADMAP.md).
 
-## Experimental OpenCL path
+## Default OpenCL path
 
-The host has an experimental OpenCL-enabled install path for depth acceleration:
+On supported Bazzite hosts, the installer now prefers an OpenCL-enabled `libfreenect2` build by default.
 
-```bash
-OPENKINECT_ENABLE_OPENCL=1 ./install.sh
-```
-
-After that build completes, set the host config to:
+The default service template also sets:
 
 ```ini
 PIPELINE=opencl
+```
+
+If you want to force the older CPU-only build path instead, use:
+
+```bash
+OPENKINECT_ENABLE_OPENCL=0 ./install.sh
 ```
 
 Then restart the service:
@@ -101,14 +103,14 @@ Then restart the service:
 sudo systemctl restart openkinect-v2.service
 ```
 
-The current recommendation is to treat this as an optimization path to compare against the default CPU build, not the default install mode yet.
+If a host cannot support the OpenCL path cleanly, switch `PIPELINE=auto` or `PIPELINE=cpu` in `/etc/openkinect-v2/openkinect-v2.conf` and rebuild with `OPENKINECT_ENABLE_OPENCL=0`.
 
 Current measured result on the Bazzite development host with an NVIDIA RTX 5070:
 
 - CPU depth path: roughly `90-110ms` in `CpuDepthPacketProcessor`
 - OpenCL depth path: roughly `0.42-0.49ms` in `OpenCLDepthPacketProcessor`
 
-That is a large enough improvement that `PIPELINE=opencl` should be considered the preferred depth-processing mode on supported hosts.
+That is a large enough improvement that `PIPELINE=opencl` is now the preferred default on supported hosts.
 
 ## Stream labels
 

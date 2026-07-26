@@ -92,7 +92,7 @@ cd openkinect-v2
 ./install.sh
 ```
 
-On current Bazzite systems the installer may need multiple runs because `rpm-ostree` applies repository and package layering through new deployments. The current host bootstrap intentionally uses a CPU-only `libfreenect2` build path, so it avoids extra GL development packages that can conflict with Bazzite's Mesa exclusions. See [docs/BAZZITE.md](docs/BAZZITE.md) for the host flow.
+On current Bazzite systems the installer may need multiple runs because `rpm-ostree` applies repository and package layering through new deployments. On supported hosts, the Bazzite bootstrap now prefers an OpenCL-enabled `libfreenect2` build for depth processing. See [docs/BAZZITE.md](docs/BAZZITE.md) for the host flow.
 
 ## 🕹️ Control Panel
 
@@ -167,7 +167,7 @@ This project brings it all together in one easy-to-use package.
 - Depth camera access
 - Skeletal tracking
 - ROS integration
-- GPU acceleration
+- Further GPU acceleration and fallback tuning
 
 ## 🤝 Contributing
 
