@@ -27,8 +27,24 @@ safe_config_path() {
 
 usage() {
   cat <<USAGE
-Usage: $(basename "$0") [start|stop|restart|status|logs|audio-status|config|mode <color|ir|depth|all>]
+Usage: $(basename "$0") [start|stop|restart|status|logs|audio-status|config|mode <color|ir|depth|all>|depth-colors <near> <mid> <far>]
 USAGE
+}
+
+is_hex_color() {
+  [[ "$1" =~ ^#[0-9A-Fa-f]{6}$ ]]
+}
+
+run_elevated() {
+  if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+reload_service_runtime() {
+  run_elevated systemctl kill -s HUP "$SERVICE"
 }
 
 set_mode() {
@@ -61,13 +77,37 @@ set_mode() {
 
   safe_config_path
 
-  sudo sed -i \
+  run_elevated sed -i \
     -e "s/^ENABLE_COLOR=.*/ENABLE_COLOR=$enable_color/" \
     -e "s/^ENABLE_IR=.*/ENABLE_IR=$enable_ir/" \
     -e "s/^ENABLE_DEPTH=.*/ENABLE_DEPTH=$enable_depth/" \
     "$CONFIG_FILE"
 
-  exec sudo systemctl restart "$SERVICE"
+  run_elevated systemctl restart "$SERVICE"
+  exit $?
+}
+
+set_depth_colors() {
+  local near_color="$1"
+  local mid_color="$2"
+  local far_color="$3"
+
+  if ! is_hex_color "$near_color" || ! is_hex_color "$mid_color" || ! is_hex_color "$far_color"; then
+    echo "Depth colors must be in #RRGGBB format" >&2
+    usage >&2
+    exit 1
+  fi
+
+  safe_config_path
+
+  run_elevated sed -i \
+    -e "s/^DEPTH_NEAR_COLOR=.*/DEPTH_NEAR_COLOR=$near_color/" \
+    -e "s/^DEPTH_MID_COLOR=.*/DEPTH_MID_COLOR=$mid_color/" \
+    -e "s/^DEPTH_FAR_COLOR=.*/DEPTH_FAR_COLOR=$far_color/" \
+    "$CONFIG_FILE"
+
+  reload_service_runtime
+  exit $?
 }
 
 command="${1:-status}"
@@ -87,6 +127,9 @@ case "$command" in
     ;;
   mode)
     set_mode "${2:-}"
+    ;;
+  depth-colors)
+    set_depth_colors "${2:-}" "${3:-}" "${4:-}"
     ;;
   *)
     usage >&2

@@ -63,4 +63,4 @@ install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/kinect-webcam.service
     DESTINATION lib/systemd/system
 )
-install(FILES services/openkinect-v2.conf DESTINATION /etc/openkinect-v2)
+install(FILES services/openkinect-v2.conf DESTINATION ${CMAKE_INSTALL_DATADIR}/openkinect-v2 RENAME openkinect-v2.conf.example)
