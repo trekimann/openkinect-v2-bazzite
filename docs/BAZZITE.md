@@ -79,6 +79,39 @@ cmake --build build
 
 If you run `./build/openkinect-v2d` directly from a containerized development shell, USB access may still fail with `LIBUSB_ERROR_ACCESS`. The expected Bazzite runtime path is the host companion install plus the systemd service, which owns `v4l2loopback` setup and runs with host-level device access.
 
+For the next round of depth performance work, see [docs/DEPTH-PERFORMANCE-ROADMAP.md](docs/DEPTH-PERFORMANCE-ROADMAP.md).
+
+## Default OpenCL path
+
+On supported Bazzite hosts, the installer now prefers an OpenCL-enabled `libfreenect2` build by default.
+
+The default service template also sets:
+
+```ini
+PIPELINE=opencl
+```
+
+If you want to force the older CPU-only build path instead, use:
+
+```bash
+OPENKINECT_ENABLE_OPENCL=0 ./install.sh
+```
+
+Then restart the service:
+
+```bash
+sudo systemctl restart openkinect-v2.service
+```
+
+If a host cannot support the OpenCL path cleanly, switch `PIPELINE=auto` or `PIPELINE=cpu` in `/etc/openkinect-v2/openkinect-v2.conf` and rebuild with `OPENKINECT_ENABLE_OPENCL=0`.
+
+Current measured result on the Bazzite development host with an NVIDIA RTX 5070:
+
+- CPU depth path: roughly `90-110ms` in `CpuDepthPacketProcessor`
+- OpenCL depth path: roughly `0.42-0.49ms` in `OpenCLDepthPacketProcessor`
+
+That is a large enough improvement that `PIPELINE=opencl` is now the preferred default on supported hosts.
+
 ## Stream labels
 
 When enabled, the host runner provisions labeled loopback devices:
@@ -88,6 +121,39 @@ When enabled, the host runner provisions labeled loopback devices:
 - `Kinect_Depth`
 
 Applications can discover the stream they need by label instead of relying on fixed `/dev/videoN` paths.
+
+## Live depth palette controls
+
+The host config now supports a three-stop blended depth palette:
+
+```ini
+DEPTH_NEAR_COLOR=#0000FF
+DEPTH_MID_COLOR=#00FF00
+DEPTH_FAR_COLOR=#FF0000
+```
+
+These colors blend near -> middle -> far in the running depth renderer.
+
+To update the palette live on the host without restarting the service:
+
+```bash
+/usr/local/libexec/openkinect-v2/openkinect-v2-hostctl.sh depth-colors '#AA0000' '#00AA00' '#0000AA'
+```
+
+From a dev container on the same machine, the host-safe form is:
+
+```bash
+distrobox-host-exec bash -lc "sudo /usr/local/libexec/openkinect-v2/openkinect-v2-hostctl.sh depth-colors '#AA0000' '#00AA00' '#0000AA'"
+```
+
+Stream mode changes still restart the service:
+
+```bash
+/usr/local/libexec/openkinect-v2/openkinect-v2-hostctl.sh mode color
+/usr/local/libexec/openkinect-v2/openkinect-v2-hostctl.sh mode ir
+/usr/local/libexec/openkinect-v2/openkinect-v2-hostctl.sh mode depth
+/usr/local/libexec/openkinect-v2/openkinect-v2-hostctl.sh mode all
+```
 
 ## Audio helpers
 
@@ -103,11 +169,28 @@ Useful commands:
 /usr/local/libexec/openkinect-v2/openkinect-v2-hostctl.sh mode color
 /usr/local/libexec/openkinect-v2/openkinect-v2-hostctl.sh mode ir
 /usr/local/libexec/openkinect-v2/openkinect-v2-hostctl.sh mode depth
+/usr/local/libexec/openkinect-v2/openkinect-v2-hostctl.sh depth-colors '#AA0000' '#00AA00' '#0000AA'
 ```
 
 ## Flatpak launcher
 
-The first Flatpak release is intentionally minimal. It forwards control actions to the host companion package:
+The control app now opens a small local control panel by default. It reads host state through the existing host bridge and exposes stream mode plus live depth palette controls.
+
+Launch the control panel directly from the repo:
+
+```bash
+python3 packaging/flatpak/openkinect-control.py
+```
+
+If you have also built and installed the Flatpak control app locally, you can launch the same UI with:
+
+```bash
+flatpak run org.openkinect.OpenKinectV2
+```
+
+By default it serves the UI on `http://127.0.0.1:40123/`, opens that URL in your browser automatically, and falls back to another local port only if `40123` is already in use.
+
+CLI forwarding still works for direct control commands:
 
 ```bash
 flatpak run org.openkinect.OpenKinectV2 status
@@ -117,4 +200,5 @@ flatpak run org.openkinect.OpenKinectV2 audio-status
 flatpak run org.openkinect.OpenKinectV2 mode color
 flatpak run org.openkinect.OpenKinectV2 mode ir
 flatpak run org.openkinect.OpenKinectV2 mode depth
+flatpak run org.openkinect.OpenKinectV2 depth-colors '#AA0000' '#00AA00' '#0000AA'
 ```

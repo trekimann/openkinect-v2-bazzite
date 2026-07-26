@@ -7,6 +7,7 @@ finish-args:
   - --share=network
   - --socket=session-bus
   - --talk-name=org.freedesktop.Flatpak
+  - --talk-name=org.freedesktop.portal.Desktop
 modules:
   - name: openkinect-control
     buildsystem: simple

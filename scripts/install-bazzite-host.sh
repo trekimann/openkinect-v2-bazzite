@@ -9,6 +9,7 @@ LIBFREENECT2_DIR="${LIBFREENECT2_DIR:-$HOME/.cache/openkinect-v2/libfreenect2}"
 LIBFREENECT2_BUILD_DIR="${LIBFREENECT2_BUILD_DIR:-$LIBFREENECT2_DIR/build}"
 ENABLE_SERVICE="${OPENKINECT_ENABLE_SERVICE:-1}"
 REBUILD_LIBFREENECT2="${OPENKINECT_REBUILD_LIBFREENECT2:-0}"
+ENABLE_OPENCL="${OPENKINECT_ENABLE_OPENCL:-1}"
 
 log() {
   printf '[openkinect-v2] %s\n' "$*"
@@ -28,6 +29,10 @@ Runs the Bazzite/Fedora host bootstrap flow.
 - If started from a distrobox/dev container, the script re-runs itself on the host.
 - On rpm-ostree systems, the first run may stage missing packages and ask for a reboot.
 - After reboot, rerun the same command to build and install libfreenect2 and openkinect-v2.
+
+Environment flags:
+- `OPENKINECT_ENABLE_OPENCL=1` keeps OpenCL acceleration enabled for the host build.
+- `OPENKINECT_ENABLE_OPENCL=0` forces the older CPU-only libfreenect2 build path.
 USAGE
 }
 
@@ -38,6 +43,12 @@ while [[ $# -gt 0 ]]; do
       ;;
     --rebuild-libfreenect2)
       REBUILD_LIBFREENECT2=1
+      ;;
+    --enable-opencl)
+      ENABLE_OPENCL=1
+      ;;
+    --disable-opencl)
+      ENABLE_OPENCL=0
       ;;
     -h|--help)
       usage
@@ -57,6 +68,7 @@ if [[ -z "${OPENKINECT_RUNNING_ON_HOST:-}" ]] && [[ -f /run/.containerenv || -f 
       OPENKINECT_RUNNING_ON_HOST=1 \
       OPENKINECT_ENABLE_SERVICE="$ENABLE_SERVICE" \
       OPENKINECT_REBUILD_LIBFREENECT2="$REBUILD_LIBFREENECT2" \
+      OPENKINECT_ENABLE_OPENCL="$ENABLE_OPENCL" \
       BUILD_DIR="$BUILD_DIR" \
       LIBFREENECT2_DIR="$LIBFREENECT2_DIR" \
       LIBFREENECT2_BUILD_DIR="$LIBFREENECT2_BUILD_DIR" \
@@ -78,6 +90,22 @@ fi
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
+}
+
+apply_libfreenect2_opencl_compat_patch() {
+  local source_file
+  for source_file in \
+    "$LIBFREENECT2_DIR/src/opencl_depth_packet_processor.cpp" \
+    "$LIBFREENECT2_DIR/src/opencl_kde_depth_packet_processor.cpp"; do
+    [[ -f "$source_file" ]] || continue
+
+    if grep -q 'const int CL_ICDL_VERSION = 2;' "$source_file"; then
+      sed -i \
+        -e 's/const int CL_ICDL_VERSION = 2;/const int ocl_icdl_version_query = 2;/' \
+        -e 's/clGetICDLoaderInfoOCLICD(CL_ICDL_VERSION,/clGetICDLoaderInfoOCLICD(ocl_icdl_version_query,/' \
+        "$source_file"
+    fi
+  done
 }
 
 require_command git
@@ -121,6 +149,7 @@ ensure_rpmfusion
 
 host_packages=(
   akmod-v4l2loopback
+  clinfo
   cmake
   gcc-c++
   git
@@ -130,6 +159,13 @@ host_packages=(
   pkgconf-pkg-config
   turbojpeg-devel
 )
+
+if [[ "$ENABLE_OPENCL" -eq 1 ]]; then
+  host_packages+=(
+    ocl-icd-devel.x86_64
+    opencl-headers.noarch
+  )
+fi
 
 missing_packages=()
 for package in "${host_packages[@]}"; do
@@ -165,7 +201,17 @@ if [[ "$REBUILD_LIBFREENECT2" -eq 1 || ! -f /usr/local/include/libfreenect2/libf
     git clone --depth 1 https://github.com/OpenKinect/libfreenect2.git "$LIBFREENECT2_DIR"
   fi
 
-  log "Configuring minimal CPU-only libfreenect2 build"
+  if [[ "$ENABLE_OPENCL" -eq 1 ]]; then
+    log "Applying libfreenect2 OpenCL compatibility patch for current Fedora headers"
+    apply_libfreenect2_opencl_compat_patch
+  fi
+
+  opencl_enabled=OFF
+  if [[ "$ENABLE_OPENCL" -eq 1 ]]; then
+    opencl_enabled=ON
+  fi
+
+  log "Configuring libfreenect2 build (OpenCL=${opencl_enabled})"
   cmake -S "$LIBFREENECT2_DIR" -B "$LIBFREENECT2_BUILD_DIR" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr/local \
@@ -173,7 +219,7 @@ if [[ "$REBUILD_LIBFREENECT2" -eq 1 || ! -f /usr/local/include/libfreenect2/libf
     -DBUILD_EXAMPLES=OFF \
     -DBUILD_OPENNI2_DRIVER=OFF \
     -DENABLE_CXX11=ON \
-    -DENABLE_OPENCL=OFF \
+    -DENABLE_OPENCL="$opencl_enabled" \
     -DENABLE_CUDA=OFF \
     -DENABLE_OPENGL=OFF \
     -DENABLE_VAAPI=OFF \
@@ -203,3 +249,8 @@ fi
 log "Host installation complete"
 log "Check service state with: sudo systemctl status openkinect-v2.service"
 log "Review config at: /etc/openkinect-v2/openkinect-v2.conf"
+if [[ "$ENABLE_OPENCL" -eq 1 ]]; then
+  log "OpenCL build requested. Set PIPELINE=opencl in /etc/openkinect-v2/openkinect-v2.conf and restart the service to test GPU depth processing."
+else
+  log "OpenCL build disabled. CPU packet processing will be used unless the host config overrides PIPELINE."
+fi

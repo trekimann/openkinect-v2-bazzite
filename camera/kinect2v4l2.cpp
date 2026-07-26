@@ -1,17 +1,6 @@
 #include <libfreenect2/libfreenect2.hpp>
 #include <libfreenect2/frame_listener_impl.h>
 #include <libfreenect2/packet_pipeline.h>
-#if __has_include(<libfreenect2/opencl_packet_pipeline.h>)
-#include <libfreenect2/opencl_packet_pipeline.h>
-#define OPENKINECT_HAS_OPENCL 1
-#endif
-#if __has_include(<libfreenect2/opengl_packet_pipeline.h>)
-#include <libfreenect2/opengl_packet_pipeline.h>
-#define OPENKINECT_HAS_OPENGL 1
-#endif
-#if __has_include(<libfreenect2/cpu_packet_pipeline.h>)
-#include <libfreenect2/cpu_packet_pipeline.h>
-#endif
 #include <algorithm>
 #include <cmath>
 #include <csignal>
@@ -47,8 +36,20 @@ constexpr double kVBlue = -0.071;
 constexpr double kUvBias = 128.0;
 
 volatile sig_atomic_t stop_requested = 0;
+volatile sig_atomic_t reload_requested = 0;
 
-void handle_signal(int) {
+struct RGBColor {
+    uint8_t r = 0;
+    uint8_t g = 0;
+    uint8_t b = 0;
+};
+
+void handle_signal(int signal_number) {
+    if (signal_number == SIGHUP) {
+        reload_requested = 1;
+        return;
+    }
+
     stop_requested = 1;
 }
 
@@ -88,6 +89,27 @@ float parse_float(const std::string &value, float default_value) {
     }
 }
 
+RGBColor parse_color(const std::string &value, const RGBColor &default_value) {
+    std::string normalized = trim(value);
+    if (!normalized.empty() && normalized.front() == '#') {
+        normalized.erase(normalized.begin());
+    }
+
+    if (normalized.size() != 6) {
+        return default_value;
+    }
+
+    try {
+        RGBColor color;
+        color.r = static_cast<uint8_t>(std::stoi(normalized.substr(0, 2), nullptr, 16));
+        color.g = static_cast<uint8_t>(std::stoi(normalized.substr(2, 2), nullptr, 16));
+        color.b = static_cast<uint8_t>(std::stoi(normalized.substr(4, 2), nullptr, 16));
+        return color;
+    } catch (...) {
+        return default_value;
+    }
+}
+
 struct Config {
     std::string pipeline = "auto";
     bool enable_color = true;
@@ -107,6 +129,9 @@ struct Config {
     int depth_height = 424;
     float depth_min_mm = 500.0f;
     float depth_max_mm = 4500.0f;
+    RGBColor depth_near_color{0, 0, 255};
+    RGBColor depth_mid_color{0, 255, 0};
+    RGBColor depth_far_color{255, 0, 0};
 };
 
 Config load_config(const std::string &path) {
@@ -152,9 +177,22 @@ Config load_config(const std::string &path) {
         else if (key == "DEPTH_HEIGHT") config.depth_height = parse_int(value, config.depth_height);
         else if (key == "DEPTH_MIN_MM") config.depth_min_mm = parse_float(value, config.depth_min_mm);
         else if (key == "DEPTH_MAX_MM") config.depth_max_mm = parse_float(value, config.depth_max_mm);
+        else if (key == "DEPTH_NEAR_COLOR") config.depth_near_color = parse_color(value, config.depth_near_color);
+        else if (key == "DEPTH_MID_COLOR") config.depth_mid_color = parse_color(value, config.depth_mid_color);
+        else if (key == "DEPTH_FAR_COLOR") config.depth_far_color = parse_color(value, config.depth_far_color);
     }
 
     return config;
+}
+
+void reload_runtime_config(Config &config, const std::string &path) {
+    const Config reloaded = load_config(path);
+    config.depth_min_mm = reloaded.depth_min_mm;
+    config.depth_max_mm = reloaded.depth_max_mm;
+    config.depth_near_color = reloaded.depth_near_color;
+    config.depth_mid_color = reloaded.depth_mid_color;
+    config.depth_far_color = reloaded.depth_far_color;
+    std::cout << "Reloaded depth palette from " << path << std::endl;
 }
 
 std::optional<std::string> resolve_video_device_by_label(const std::string &label) {
@@ -301,28 +339,48 @@ std::vector<uint8_t> normalize_ir_frame(const libfreenect2::Frame *frame) {
     return gray;
 }
 
-void write_depth_color(float normalized, uint8_t &r, uint8_t &g, uint8_t &b) {
-    normalized = std::clamp(normalized, 0.0f, 1.0f);
-    if (normalized < 0.25f) {
-        r = 0;
-        g = static_cast<uint8_t>(normalized / 0.25f * 255.0f);
-        b = 255;
-    } else if (normalized < 0.5f) {
-        r = 0;
-        g = 255;
-        b = static_cast<uint8_t>((1.0f - (normalized - 0.25f) / 0.25f) * 255.0f);
-    } else if (normalized < 0.75f) {
-        r = static_cast<uint8_t>(((normalized - 0.5f) / 0.25f) * 255.0f);
-        g = 255;
-        b = 0;
-    } else {
-        r = 255;
-        g = static_cast<uint8_t>((1.0f - (normalized - 0.75f) / 0.25f) * 255.0f);
-        b = 0;
-    }
+RGBColor blend_color(const RGBColor &from, const RGBColor &to, float ratio) {
+    const float clamped = std::clamp(ratio, 0.0f, 1.0f);
+    RGBColor blended;
+    blended.r = static_cast<uint8_t>(std::lround(from.r + (to.r - from.r) * clamped));
+    blended.g = static_cast<uint8_t>(std::lround(from.g + (to.g - from.g) * clamped));
+    blended.b = static_cast<uint8_t>(std::lround(from.b + (to.b - from.b) * clamped));
+    return blended;
 }
 
-std::vector<uint8_t> colorize_depth_frame(const libfreenect2::Frame *frame, float min_mm, float max_mm) {
+void write_depth_color(
+    float normalized,
+    uint8_t &r,
+    uint8_t &g,
+    uint8_t &b,
+    const RGBColor &near_color,
+    const RGBColor &mid_color,
+    const RGBColor &far_color
+) {
+    normalized = std::clamp(normalized, 0.0f, 1.0f);
+    RGBColor color;
+
+    if (normalized < 0.5f) {
+        color = blend_color(near_color, mid_color, normalized * 2.0f);
+    } else if (normalized < 0.75f) {
+        color = blend_color(mid_color, far_color, (normalized - 0.5f) * 2.0f);
+    } else {
+        color = blend_color(mid_color, far_color, (normalized - 0.5f) * 2.0f);
+    }
+
+    r = color.r;
+    g = color.g;
+    b = color.b;
+}
+
+std::vector<uint8_t> colorize_depth_frame(
+    const libfreenect2::Frame *frame,
+    float min_mm,
+    float max_mm,
+    const RGBColor &near_color,
+    const RGBColor &mid_color,
+    const RGBColor &far_color
+) {
     const auto *input = reinterpret_cast<const float *>(frame->data);
     std::vector<uint8_t> bgrx(static_cast<size_t>(frame->width) * static_cast<size_t>(frame->height) * 4U, 0);
     const float range = std::max(1.0f, max_mm - min_mm);
@@ -333,7 +391,7 @@ std::vector<uint8_t> colorize_depth_frame(const libfreenect2::Frame *frame, floa
         uint8_t g = 0;
         uint8_t b = 0;
         if (std::isfinite(value) && value >= min_mm && value <= max_mm) {
-            write_depth_color((value - min_mm) / range, r, g, b);
+            write_depth_color((value - min_mm) / range, r, g, b, near_color, mid_color, far_color);
         }
         const size_t base = pixel * 4;
         bgrx[base + 0] = b;
@@ -347,7 +405,7 @@ std::vector<uint8_t> colorize_depth_frame(const libfreenect2::Frame *frame, floa
 
 std::unique_ptr<libfreenect2::PacketPipeline> make_pipeline(const std::string &requested) {
     const std::string pipeline = requested.empty() ? "auto" : requested;
-#if defined(OPENKINECT_HAS_OPENCL)
+#if defined(LIBFREENECT2_WITH_OPENCL_SUPPORT)
     if (pipeline == "opencl" || pipeline == "auto") {
         try {
             std::cout << "Using OpenCL packet pipeline" << std::endl;
@@ -357,7 +415,7 @@ std::unique_ptr<libfreenect2::PacketPipeline> make_pipeline(const std::string &r
         }
     }
 #endif
-#if defined(OPENKINECT_HAS_OPENGL)
+#if defined(LIBFREENECT2_WITH_OPENGL_SUPPORT)
     if (pipeline == "opengl" || pipeline == "auto") {
         try {
             std::cout << "Using OpenGL packet pipeline" << std::endl;
@@ -470,8 +528,14 @@ int main(int argc, char *argv[]) {
 
     std::signal(SIGINT, handle_signal);
     std::signal(SIGTERM, handle_signal);
+    std::signal(SIGHUP, handle_signal);
 
     while (!stop_requested) {
+        if (reload_requested) {
+            reload_requested = 0;
+            reload_runtime_config(config, config_path);
+        }
+
         if (!listener.waitForNewFrame(frames, 10 * 1000)) {
             std::cerr << "Timeout waiting for frames" << std::endl;
             continue;
@@ -494,7 +558,14 @@ int main(int argc, char *argv[]) {
 
         if (config.enable_depth) {
             if (auto *frame = find_frame(frames, libfreenect2::Frame::Depth)) {
-                auto depth_bgrx = colorize_depth_frame(frame, config.depth_min_mm, config.depth_max_mm);
+                auto depth_bgrx = colorize_depth_frame(
+                    frame,
+                    config.depth_min_mm,
+                    config.depth_max_mm,
+                    config.depth_near_color,
+                    config.depth_mid_color,
+                    config.depth_far_color
+                );
                 rgb_to_yuyv(depth_bgrx.data(), depth_output.buffer, config.depth_width, config.depth_height);
                 depth_output.write_frame();
             }
